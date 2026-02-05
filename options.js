@@ -1,0 +1,51 @@
+// options.js — Save / load Jira credentials
+
+(function () {
+  "use strict";
+
+  var jiraBaseUrlInput = document.getElementById("jiraBaseUrl");
+  var usernameInput = document.getElementById("username");
+  var passwordInput = document.getElementById("password");
+  var saveBtn = document.getElementById("save");
+  var statusEl = document.getElementById("status");
+
+  // Load saved values
+  chrome.storage.local.get(["jiraBaseUrl", "username", "password"], function (data) {
+    if (data.jiraBaseUrl) {
+      jiraBaseUrlInput.value = data.jiraBaseUrl;
+    }
+    if (data.username) {
+      usernameInput.value = data.username;
+    }
+    if (data.password) {
+      passwordInput.value = data.password;
+    }
+  });
+
+  saveBtn.addEventListener("click", function () {
+    var jiraBaseUrl = jiraBaseUrlInput.value.trim();
+    var username = usernameInput.value.trim();
+    var password = passwordInput.value;
+
+    if (!jiraBaseUrl || !username || !password) {
+      statusEl.textContent = "All fields are required.";
+      statusEl.style.color = "#d9534f";
+      return;
+    }
+
+    chrome.storage.local.set(
+      {
+        "jiraBaseUrl": jiraBaseUrl,
+        "username": username,
+        "password": password
+      },
+      function () {
+        statusEl.textContent = "Settings saved!";
+        statusEl.style.color = "#2da160";
+        setTimeout(function () {
+          statusEl.textContent = "";
+        }, 2500);
+      }
+    );
+  });
+})();

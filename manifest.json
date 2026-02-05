@@ -1,0 +1,35 @@
+{
+  "manifest_version": 3,
+  "name": "GitLab MR → Jira Bugfix Mover",
+  "version": "1.0.0",
+  "description": "Adds a button to GitLab Merge Request pages to move linked Jira issues to bugfix status.",
+  "permissions": [
+    "storage",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "icons": {
+    "48": "icon.png",
+    "128": "icon.png"
+  }
+}
