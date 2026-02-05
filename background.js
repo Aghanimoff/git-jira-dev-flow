@@ -1,11 +1,18 @@
 // background.js — Service Worker for Jira transition calls
 
 chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
-  if (message.action !== "moveToJiraBugfix") {
+  if (message.action !== "transitionJiraIssue") {
     return false;
   }
 
   var issueKeys = message.issueKeys || [];
+  var transitionName = message.transitionName || "";
+
+  if (!transitionName) {
+    sendResponse({ success: 0, failed: 0, errors: ["No transition name provided."] });
+    return true;
+  }
+
   if (issueKeys.length === 0) {
     sendResponse({ success: 0, failed: 0, errors: ["No Jira issue keys provided."] });
     return true;
@@ -31,7 +38,7 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
     }
 
     issueKeys.forEach(function (key) {
-      transitionIssue(baseUrl, authHeader, key, results, checkDone);
+      transitionIssue(baseUrl, authHeader, key, transitionName, results, checkDone);
     });
   });
 
@@ -40,8 +47,9 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
 });
 
 
-function transitionIssue(baseUrl, authHeader, issueKey, results, done) {
+function transitionIssue(baseUrl, authHeader, issueKey, transitionName, results, done) {
   var transitionsUrl = baseUrl + "/rest/api/2/issue/" + issueKey + "/transitions";
+  var targetLower = transitionName.toLowerCase();
 
   fetch(transitionsUrl, {
     method: "GET",
@@ -61,14 +69,14 @@ function transitionIssue(baseUrl, authHeader, issueKey, results, done) {
       var target = null;
 
       for (var i = 0; i < transitions.length; i++) {
-        if (transitions[i].name && transitions[i].name.toLowerCase() === "bugfix") {
+        if (transitions[i].name && transitions[i].name.toLowerCase() === targetLower) {
           target = transitions[i];
           break;
         }
       }
 
       if (!target) {
-        throw new Error(issueKey + ": transition \"bugfix\" not found. Available: " +
+        throw new Error(issueKey + ": transition \"" + transitionName + "\" not found. Available: " +
           transitions.map(function (t) { return t.name; }).join(", "));
       }
 

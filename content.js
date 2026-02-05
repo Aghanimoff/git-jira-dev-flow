@@ -3,8 +3,16 @@
 (function () {
   "use strict";
 
-  var BUTTON_ID = "jira-bugfix-mover-btn";
+  var CONTAINER_ID = "jira-status-mover-container";
   var MR_PATH_RE = /\/merge_requests\/\d+/;
+
+  // Button definitions: label shown on the button, Jira transition name, CSS color
+  var BUTTONS = [
+    { label: "Bugfix",        transitionName: "bugfix",        color: "rgb(83, 46, 22)"  },
+    { label: "Internal Test", transitionName: "internal test", color: "rgb(99, 166, 233)" },
+    { label: "Test Control",  transitionName: "test control",  color: "rgb(99, 166, 233)" },
+    { label: "Done",          transitionName: "done",          color: "rgb(99, 166, 233)" }
+  ];
 
   // ---- URL / key detection ----
 
@@ -55,16 +63,44 @@
 
   // ---- Button creation ----
 
-  function createButton() {
+  function createButtonContainer() {
+    var container = document.createElement("span");
+    container.id = CONTAINER_ID;
+    container.style.display = "inline-flex";
+    container.style.gap = "6px";
+    container.style.marginLeft = "auto";
+    container.style.flexWrap = "wrap";
+    container.style.alignItems = "center";
+
+    // "Jira:" label before the buttons
+    var jiraLabel = document.createElement("span");
+    jiraLabel.textContent = "Jira:";
+    jiraLabel.style.fontWeight = "600";
+    jiraLabel.style.fontSize = "13px";
+    jiraLabel.style.color = "#333";
+    container.appendChild(jiraLabel);
+
+    BUTTONS.forEach(function (def) {
+      var btn = createSingleButton(def);
+      container.appendChild(btn);
+    });
+
+    return container;
+  }
+
+  function createSingleButton(def) {
     var btn = document.createElement("button");
-    btn.id = BUTTON_ID;
     btn.type = "button";
-    btn.className = "btn gl-button btn-confirm btn-sm";
-    btn.style.marginLeft = "8px";
+    btn.className = "btn gl-button btn-sm";
+    btn.style.backgroundColor = def.color;
+    btn.style.color = "#fff";
+    btn.style.border = "none";
+    btn.style.cursor = "pointer";
+    btn.dataset.transitionName = def.transitionName;
 
     var textSpan = document.createElement("span");
     textSpan.className = "gl-button-text";
-    textSpan.textContent = "Jira → bugfix";
+    textSpan.textContent = def.label;
     btn.appendChild(textSpan);
 
     btn.addEventListener("click", function () {
@@ -78,27 +114,31 @@
 
       if (issueKeys.length === 0) {
         showToast("No Jira issue keys found in MR description / title.", true);
-        resetButton(btn);
+        resetButton(btn, def.label);
         return;
       }
 
       chrome.runtime.sendMessage(
-        { "action": "moveToJiraBugfix", "issueKeys": issueKeys },
+        {
+          "action": "transitionJiraIssue",
+          "issueKeys": issueKeys,
+          "transitionName": def.transitionName
+        },
         function (response) {
           if (chrome.runtime.lastError) {
             showToast("Extension error: " + chrome.runtime.lastError.message, true);
-            resetButton(btn);
+            resetButton(btn, def.label);
             return;
           }
           if (!response) {
             showToast("No response from background.", true);
-            resetButton(btn);
+            resetButton(btn, def.label);
             return;
           }
 
           var parts = [];
           if (response.success > 0) {
-            parts.push("Success: " + response.success);
+            parts.push("✓ " + def.label + " — Success: " + response.success);
           }
           if (response.failed > 0) {
             parts.push("Failed: " + response.failed);
@@ -116,14 +156,14 @@
     return btn;
   }
 
-  function resetButton(btn) {
+  function resetButton(btn, label) {
     btn.disabled = false;
     var span = btn.querySelector(".gl-button-text");
     if (span) {
-      span.textContent = "Jira → bugfix";
+      span.textContent = label;
     }
     btn.style.opacity = "1";
-    btn.style.cursor = "";
+    btn.style.cursor = "pointer";
   }
 
   // ---- Toast notification ----
@@ -167,41 +207,52 @@
     return MR_PATH_RE.test(window.location.pathname);
   }
 
-  function injectButton() {
+  function injectButtons() {
     if (!isMRPage()) {
-      removeButton();
+      removeButtons();
       return;
     }
-    if (document.getElementById(BUTTON_ID)) {
+    if (document.getElementById(CONTAINER_ID)) {
       return; // already injected
     }
 
-    // Primary: insert right after the Approve / Revoke approval button
+    // Find the outermost media-body flex container and append to it
+    // so margin-left:auto pushes the buttons to the far right edge
+    var summaryRow = document.querySelector("[data-testid='approvals-summary-content']");
+    if (summaryRow) {
+      // media-body is the top-level full-width flex container
+      var mediaBody = summaryRow.closest(".media-body");
+      if (mediaBody) {
+        mediaBody.appendChild(createButtonContainer());
+        return;
+      }
+    }
+
+    // Fallback: try approve button's grandparent (media-body level)
     var approveBtn = document.querySelector("[data-testid='approve-button']");
     if (approveBtn) {
-      approveBtn.parentNode.insertBefore(createButton(), approveBtn.nextSibling);
+      var mediaBody = approveBtn.closest(".media-body");
+      if (mediaBody) {
+        mediaBody.appendChild(createButtonContainer());
+        return;
+      }
+      approveBtn.parentNode.appendChild(createButtonContainer());
       return;
     }
 
     // Approvals section exists but no approve button yet — place inside action area
     var approvalsSection = document.querySelector(".js-mr-approvals");
     if (approvalsSection) {
-      // Try the row with approve summary
-      var summaryRow = approvalsSection.querySelector("[data-testid='approvals-summary-content']");
-      if (summaryRow) {
-        summaryRow.appendChild(createButton());
-        return;
-      }
       // Try action buttons area
       var actions = approvalsSection.querySelector(".state-container-action-buttons");
       if (actions) {
-        actions.prepend(createButton());
+        actions.prepend(createButtonContainer());
         return;
       }
       // Any mr-widget-body inside approvals
       var widgetBody = approvalsSection.querySelector(".mr-widget-body");
       if (widgetBody) {
-        widgetBody.appendChild(createButton());
+        widgetBody.appendChild(createButtonContainer());
         return;
       }
     }
@@ -210,10 +261,10 @@
     // the approvals widget renders.
   }
 
-  function removeButton() {
-    var btn = document.getElementById(BUTTON_ID);
-    if (btn && btn.parentNode) {
-      btn.parentNode.removeChild(btn);
+  function removeButtons() {
+    var container = document.getElementById(CONTAINER_ID);
+    if (container && container.parentNode) {
+      container.parentNode.removeChild(container);
     }
   }
 
@@ -224,17 +275,17 @@
   function onUrlChange() {
     if (window.location.href !== lastUrl) {
       lastUrl = window.location.href;
-      removeButton();
+      removeButtons();
       // Small delay to let GitLab render the new page
-      setTimeout(injectButton, 800);
+      setTimeout(injectButtons, 800);
     }
   }
 
   var observer = new MutationObserver(function () {
     onUrlChange();
-    // Also try inject if we are on MR page but button is missing (DOM re-render)
-    if (isMRPage() && !document.getElementById(BUTTON_ID)) {
-      injectButton();
+    // Also try inject if we are on MR page but buttons are missing (DOM re-render)
+    if (isMRPage() && !document.getElementById(CONTAINER_ID)) {
+      injectButtons();
     }
   });
 
@@ -244,5 +295,5 @@
   });
 
   // Initial injection
-  injectButton();
+  injectButtons();
 })();
