@@ -6,6 +6,26 @@
   var CONTAINER_ID = "jira-status-mover-container";
   var MR_PATH_RE = /\/merge_requests\/\d+/;
 
+  // ---- Inject CSS animation keyframes once ----
+  (function injectStyles() {
+    if (document.getElementById("jira-mover-styles")) return;
+    var style = document.createElement("style");
+    style.id = "jira-mover-styles";
+    style.textContent = [
+      ".jira-btn-transition {",
+      "  transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.3s ease;",
+      "}",
+      ".jira-btn-transition:hover:not(:disabled) {",
+      "  transform: translateY(-1px);",
+      "  box-shadow: 0 2px 8px rgba(0,0,0,0.25);",
+      "}",
+      ".jira-btn-transition:active:not(:disabled) {",
+      "  transform: scale(0.95);",
+      "}"
+    ].join("\n");
+    document.head.appendChild(style);
+  })();
+
   // Button definitions: label shown on the button, Jira transition name, CSS color
   var BUTTONS = [
     { label: "Bugfix",        transitionName: "bugfix",        color: "rgb(83, 46, 22)"  },
@@ -91,7 +111,7 @@
   function createSingleButton(def) {
     var btn = document.createElement("button");
     btn.type = "button";
-    btn.className = "btn gl-button btn-sm";
+    btn.className = "btn gl-button btn-sm jira-btn-transition";
     btn.style.backgroundColor = def.color;
     btn.style.color = "#fff";
     btn.style.border = "none";
@@ -105,7 +125,6 @@
 
     btn.addEventListener("click", function () {
       btn.disabled = true;
-      textSpan.textContent = "Processing…";
       btn.style.opacity = "0.6";
       btn.style.cursor = "default";
 
