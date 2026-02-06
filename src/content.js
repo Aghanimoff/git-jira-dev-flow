@@ -17,25 +17,6 @@
     _jiraBaseUrl = (data.jiraBaseUrl || "").replace(/\/+$/, "");
   });
 
-  (function injectStyles() {
-    if (document.getElementById("jira-mover-styles")) return;
-    var style = document.createElement("style");
-    style.id = "jira-mover-styles";
-    style.textContent = [
-      ".jira-btn-transition {",
-      "  transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.3s ease;",
-      "}",
-      ".jira-btn-transition:hover:not(:disabled) {",
-      "  transform: translateY(-1px);",
-      "  box-shadow: 0 2px 8px rgba(0,0,0,0.25);",
-      "}",
-      ".jira-btn-transition:active:not(:disabled) {",
-      "  transform: scale(0.95);",
-      "}"
-    ].join("\n");
-    document.head.appendChild(style);
-  })();
-
   // { label, transitionName (null = no transition), color, worklogComment, visibility }
   var BUTTONS = [
     { label: "CodeReview",    transitionName: null,            color: "rgb(85, 85, 85)",   worklogComment: "Code Review",          visibility: { status: "open",   branches: ["develop"] } },
@@ -297,26 +278,9 @@
     textSpan.textContent = def.label;
     btn.appendChild(textSpan);
 
-    // Create warning indicator
     var warningIndicator = document.createElement("span");
-    warningIndicator.className = "warning-indicator";
+    warningIndicator.className = "jira-warn-badge";
     warningIndicator.textContent = "!";
-    warningIndicator.style.cssText = [
-      "position: absolute",
-      "top: -4px",
-      "right: -4px",
-      "background: #ff6b35",
-      "color: white",
-      "border-radius: 50%",
-      "width: 16px",
-      "height: 16px",
-      "font-size: 10px",
-      "font-weight: bold",
-      "line-height: 16px",
-      "text-align: center",
-      "display: none",
-      "z-index: 1"
-    ].join(";");
     warningIndicator.title = "Some tasks may already be in the target status";
     btn.appendChild(warningIndicator);
 
@@ -473,156 +437,56 @@
     );
   }
 
-  // --- Toast ---
+  // --- Toast & Dialog ---
 
   function showToast(msg, isError) {
     var toast = document.createElement("div");
+    toast.className = "jira-toast " + (isError ? "jira-toast--err" : "jira-toast--ok");
     toast.textContent = msg;
-    toast.style.cssText = [
-      "position: fixed",
-      "bottom: 24px",
-      "right: 24px",
-      "max-width: 480px",
-      "padding: 12px 20px",
-      "border-radius: 6px",
-      "font-size: 13px",
-      "line-height: 1.4",
-      "color: #fff",
-      "background:" + (isError ? " #d9534f" : " #2da160"),
-      "box-shadow: 0 4px 12px rgba(0,0,0,0.25)",
-      "z-index: 999999",
-      "white-space: pre-wrap",
-      "word-break: break-word",
-      "transition: opacity 0.3s"
-    ].join(";");
-
     document.body.appendChild(toast);
     setTimeout(function () {
       toast.style.opacity = "0";
-      setTimeout(function () {
-        if (toast.parentNode) toast.parentNode.removeChild(toast);
-      }, 400);
+      setTimeout(function () { if (toast.parentNode) toast.parentNode.removeChild(toast); }, 400);
     }, 6000);
   }
 
   function showWarningDialog(title, message, onConfirm, onCancel) {
-    // Create overlay
     var overlay = document.createElement("div");
-    overlay.className = "jira-warning-overlay";
-    overlay.style.cssText = [
-      "position: fixed",
-      "top: 0",
-      "left: 0",
-      "width: 100%",
-      "height: 100%",
-      "background: rgba(0,0,0,0.5)",
-      "z-index: 999998",
-      "display: flex",
-      "align-items: center",
-      "justify-content: center"
-    ].join(";");
+    overlay.className = "jira-dialog-overlay";
 
-    // Create dialog
     var dialog = document.createElement("div");
-    dialog.style.cssText = [
-      "background: white",
-      "padding: 24px",
-      "border-radius: 8px",
-      "max-width: 500px",
-      "margin: 20px",
-      "box-shadow: 0 8px 32px rgba(0,0,0,0.3)",
-      "font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
-    ].join(";");
+    dialog.className = "jira-dialog";
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+    dialog.innerHTML =
+      "<h3></h3><p></p><div class='jira-dialog-actions'>" +
+      "<button class='jira-dialog-btn jira-dialog-btn--cancel'>Cancel</button>" +
+      "<button class='jira-dialog-btn jira-dialog-btn--confirm'>Proceed</button></div>";
+    dialog.querySelector("h3").textContent = title;
+    dialog.querySelector("p").textContent = message.replace(/\\n/g, "\n");
 
-    // Title
-    var titleEl = document.createElement("h3");
-    titleEl.textContent = title;
-    titleEl.style.cssText = [
-      "margin: 0 0 16px 0",
-      "font-size: 18px",
-      "font-weight: 600",
-      "color: #ff6b35"
-    ].join(";");
-
-    // Message
-    var messageEl = document.createElement("p");
-    messageEl.textContent = message.replace(/\\n/g, "\n");
-    messageEl.style.cssText = [
-      "margin: 0 0 24px 0",
-      "font-size: 14px",
-      "line-height: 1.5",
-      "color: #333",
-      "white-space: pre-wrap"
-    ].join(";");
-
-    // Buttons container
-    var buttonsContainer = document.createElement("div");
-    buttonsContainer.style.cssText = [
-      "display: flex",
-      "gap: 12px",
-      "justify-content: flex-end"
-    ].join(";");
-
-    // Cancel button
-    var cancelBtn = document.createElement("button");
-    cancelBtn.textContent = "Cancel";
-    cancelBtn.style.cssText = [
-      "padding: 8px 16px",
-      "border: 1px solid #ccc",
-      "background: white",
-      "color: #333",
-      "border-radius: 4px",
-      "cursor: pointer",
-      "font-size: 14px"
-    ].join(";");
-
-    // Confirm button
-    var confirmBtn = document.createElement("button");
-    confirmBtn.textContent = "Proceed";
-    confirmBtn.style.cssText = [
-      "padding: 8px 16px",
-      "border: none",
-      "background: #ff6b35",
-      "color: white",
-      "border-radius: 4px",
-      "cursor: pointer",
-      "font-size: 14px"
-    ].join(";");
-
-    // Event handlers
+    var doCancel = function () { cleanup(); if (onCancel) onCancel(); };
     var cleanup = function () {
       if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+    var onKey = function (e) {
+      if (e.key === "Escape") { e.stopPropagation(); doCancel(); }
     };
 
-    cancelBtn.addEventListener("click", function () {
-      cleanup();
-      if (onCancel) onCancel();
-    });
+    // Prevent background scroll while dialog is open
+    var prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.addEventListener("keydown", onKey);
 
-    confirmBtn.addEventListener("click", function () {
-      cleanup();
-      if (onConfirm) onConfirm();
-    });
+    dialog.querySelector(".jira-dialog-btn--cancel").addEventListener("click", doCancel);
+    dialog.querySelector(".jira-dialog-btn--confirm").addEventListener("click", function () { cleanup(); if (onConfirm) onConfirm(); });
+    overlay.addEventListener("click", function (e) { if (e.target === overlay) doCancel(); });
 
-    overlay.addEventListener("click", function (e) {
-      if (e.target === overlay) {
-        cleanup();
-        if (onCancel) onCancel();
-      }
-    });
-
-    // Assemble dialog
-    buttonsContainer.appendChild(cancelBtn);
-    buttonsContainer.appendChild(confirmBtn);
-    dialog.appendChild(titleEl);
-    dialog.appendChild(messageEl);
-    dialog.appendChild(buttonsContainer);
     overlay.appendChild(dialog);
-    
     document.body.appendChild(overlay);
-    
-    // Focus confirm button
-    confirmBtn.focus();
+    dialog.querySelector(".jira-dialog-btn--confirm").focus();
   }
 
   function updateWarningIndicators() {
@@ -655,7 +519,7 @@
           return function (response) {
             if (!response || response.errors) return;
             
-            var indicator = button.querySelector(".warning-indicator");
+            var indicator = button.querySelector(".jira-warn-badge");
             if (!indicator) return;
 
             var hasIssuesInTarget = response.statuses && response.statuses.some(function (s) {

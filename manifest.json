@@ -18,6 +18,9 @@
       "matches": [
         "<all_urls>"
       ],
+      "css": [
+        "src/content.css"
+      ],
       "js": [
         "src/content.js"
       ],

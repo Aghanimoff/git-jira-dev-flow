@@ -1,0 +1,115 @@
+/* content.css — Git&Jira deroutine Dev Flow (injected into GitLab pages) */
+
+/* Button hover / active */
+.jira-btn-transition {
+  transition: transform .15s ease, box-shadow .15s ease, opacity .3s ease;
+}
+.jira-btn-transition:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .25);
+}
+.jira-btn-transition:active:not(:disabled) {
+  transform: scale(.95);
+}
+
+/* Warning badge on buttons */
+.jira-warn-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  background: #ff6b35;
+  color: #fff;
+  border-radius: 50%;
+  width: 16px;
+  height: 16px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  display: none;
+  z-index: 1;
+}
+
+/* Toast notifications */
+.jira-toast {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  max-width: 480px;
+  padding: 12px 20px;
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, .25);
+  z-index: 999999;
+  white-space: pre-wrap;
+  word-break: break-word;
+  transition: opacity .3s;
+}
+.jira-toast--ok  { background: #2da160; }
+.jira-toast--err { background: #d9534f; }
+
+/* Dialog overlay — theme-aware via GitLab CSS variables */
+.jira-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, .45);
+  z-index: 999998;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Dialog box */
+.jira-dialog {
+  max-width: 500px;
+  margin: 20px;
+  padding: 24px;
+  border-radius: 8px;
+  background: var(--gl-background-color-default, var(--color-bg-default, #fff));
+  color: var(--gl-text-color-default, var(--color-text-default, #333));
+  box-shadow: 0 8px 32px rgba(0, 0, 0, .3);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+.jira-dialog h3 {
+  margin: 0 0 16px;
+  font-size: 18px;
+  font-weight: 600;
+  color: #ff6b35;
+}
+.jira-dialog p {
+  margin: 0 0 24px;
+  font-size: 14px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+.jira-dialog-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
+/* Dialog buttons — theme-aware */
+.jira-dialog-btn {
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-size: 14px;
+  cursor: pointer;
+}
+.jira-dialog-btn--cancel {
+  border: 1px solid var(--gl-border-color-default, #ccc);
+  background: var(--gl-background-color-default, #fff);
+  color: var(--gl-text-color-default, #333);
+}
+.jira-dialog-btn--cancel:hover {
+  background: var(--gl-background-color-subtle, #f0f0f0);
+}
+.jira-dialog-btn--confirm {
+  border: none;
+  background: #ff6b35;
+  color: #fff;
+}
+.jira-dialog-btn--confirm:hover {
+  background: #e55a24;
+}
