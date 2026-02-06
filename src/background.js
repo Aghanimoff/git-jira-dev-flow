@@ -11,6 +11,29 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
     return false;
   }
 
+  if (message.action === "checkIssueStatuses") {
+    var issueKeys = message.issueKeys || [];
+    var targetStatus = message.targetStatus || "";
+
+    if (issueKeys.length === 0) {
+      sendResponse({ allInTargetStatus: false, statuses: [], errors: ["No issue keys provided."] });
+      return true;
+    }
+
+    chrome.storage.local.get(["jiraBaseUrl", "username", "password"], function (cfg) {
+      if (!cfg.jiraBaseUrl || !cfg.username || !cfg.password) {
+        sendResponse({ allInTargetStatus: false, statuses: [], errors: ["Jira credentials not configured."] });
+        return;
+      }
+
+      var baseUrl = cfg.jiraBaseUrl.replace(/\/+$/, "");
+      var authHeader = "Basic " + btoa(cfg.username + ":" + cfg.password);
+      
+      checkIssueStatuses(baseUrl, authHeader, issueKeys, targetStatus, sendResponse);
+    });
+    return true;
+  }
+
   if (message.action !== "processJiraAction") return false;
 
   var issueKeys = message.issueKeys || [];
@@ -64,6 +87,55 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
 
   return true;
 });
+
+function checkIssueStatuses(baseUrl, authHeader, issueKeys, targetStatus, sendResponse) {
+  var results = { allInTargetStatus: true, statuses: [], errors: [] };
+  var pending = issueKeys.length;
+  
+  if (pending === 0) {
+    sendResponse(results);
+    return;
+  }
+
+  issueKeys.forEach(function (issueKey) {
+    var url = baseUrl + "/rest/api/2/issue/" + issueKey + "?fields=status";
+    
+    fetch(url, {
+      method: "GET",
+      headers: { "Authorization": authHeader, "Content-Type": "application/json" }
+    })
+      .then(function (resp) {
+        if (!resp.ok) throw new Error("GET status for " + issueKey + " failed: HTTP " + resp.status);
+        return resp.json();
+      })
+      .then(function (data) {
+        var currentStatus = (data.fields && data.fields.status && data.fields.status.name) || "Unknown";
+        var isInTargetStatus = currentStatus.toLowerCase() === targetStatus.toLowerCase();
+        
+        results.statuses.push({
+          issueKey: issueKey,
+          currentStatus: currentStatus,
+          isInTargetStatus: isInTargetStatus
+        });
+        
+        if (!isInTargetStatus) {
+          results.allInTargetStatus = false;
+        }
+        
+        if (--pending <= 0) {
+          sendResponse(results);
+        }
+      })
+      .catch(function (err) {
+        results.errors.push(err.message || String(err));
+        results.allInTargetStatus = false;
+        
+        if (--pending <= 0) {
+          sendResponse(results);
+        }
+      });
+  });
+}
 
 function transitionIssue(baseUrl, authHeader, issueKey, transitionName, results, done) {
   var url = baseUrl + "/rest/api/2/issue/" + issueKey + "/transitions";

@@ -106,6 +106,9 @@
         // Fallback: show all buttons after timeout
         _visibilityResolved = true;
         applyVisibility(container, null, null);
+        
+        // Update warning indicators after fallback
+        setTimeout(updateWarningIndicators, 100);
       }
       return;
     }
@@ -114,6 +117,9 @@
     _visibilityRetries = 0;
     clearTimeout(_visibilityTimer);
     applyVisibility(container, status, targetBranch);
+    
+    // Update warning indicators after visibility is resolved
+    setTimeout(updateWarningIndicators, 100);
   }
 
   function applyVisibility(container, status, targetBranch) {
@@ -270,6 +276,7 @@
     btn.style.color = "#fff";
     btn.style.border = "none";
     btn.style.cursor = "pointer";
+    btn.style.position = "relative";
     btn.dataset.transitionName = def.transitionName;
     btn.dataset.btnLabel = def.label;
     btn.style.display = "none";
@@ -290,6 +297,29 @@
     textSpan.textContent = def.label;
     btn.appendChild(textSpan);
 
+    // Create warning indicator
+    var warningIndicator = document.createElement("span");
+    warningIndicator.className = "warning-indicator";
+    warningIndicator.textContent = "!";
+    warningIndicator.style.cssText = [
+      "position: absolute",
+      "top: -4px",
+      "right: -4px",
+      "background: #ff6b35",
+      "color: white",
+      "border-radius: 50%",
+      "width: 16px",
+      "height: 16px",
+      "font-size: 10px",
+      "font-weight: bold",
+      "line-height: 16px",
+      "text-align: center",
+      "display: none",
+      "z-index: 1"
+    ].join(";");
+    warningIndicator.title = "Some tasks may already be in the target status";
+    btn.appendChild(warningIndicator);
+
     btn.addEventListener("click", handleButtonClick.bind(null, btn, def));
     return btn;
   }
@@ -306,6 +336,85 @@
   }
 
   function handleButtonClick(btn, def) {
+    if (!def.transitionName) {
+      // For CodeReview button (no transition), proceed directly
+      executeJiraAction(btn, def);
+      return;
+    }
+
+    // Check issue statuses first for transition buttons
+    setAllButtonsDisabled(true);
+    
+    var text = getMRTitleText() + "\n" + getMRDescriptionText();
+    var issueKeys = extractJiraKeys(text);
+
+    if (issueKeys.length === 0) {
+      showToast("No Jira issue keys found in MR description / title.", true);
+      setAllButtonsDisabled(false);
+      return;
+    }
+
+    chrome.runtime.sendMessage(
+      {
+        action: "checkIssueStatuses",
+        issueKeys: issueKeys,
+        targetStatus: def.label
+      },
+      function (response) {
+        if (chrome.runtime.lastError) {
+          showToast("Extension error: " + chrome.runtime.lastError.message, true);
+          setAllButtonsDisabled(false);
+          return;
+        }
+
+        if (!response) {
+          showToast("No response from background.", true);
+          setAllButtonsDisabled(false);
+          return;
+        }
+
+        if (response.errors && response.errors.length > 0) {
+          showToast("Status check failed: " + response.errors.join(", "), true);
+          setAllButtonsDisabled(false);
+          return;
+        }
+
+        // Check if all issues are already in target status
+        if (response.allInTargetStatus) {
+          var alreadyInStatus = response.statuses.map(function (s) { return s.issueKey; }).join(", ");
+          showWarningDialog(
+            "All Issues Already in Target Status",
+            "All linked issues are already in '" + def.label + "' status:\\n" + alreadyInStatus + "\\n\\nDo you want to proceed anyway?",
+            function () { executeJiraAction(btn, def); },
+            function () { setAllButtonsDisabled(false); }
+          );
+          return;
+        }
+
+        // Check if some issues are already in target status
+        var alreadyInTarget = response.statuses.filter(function (s) { return s.isInTargetStatus; });
+        if (alreadyInTarget.length > 0) {
+          var alreadyInKeys = alreadyInTarget.map(function (s) { return s.issueKey; }).join(", ");
+          var notInTarget = response.statuses.filter(function (s) { return !s.isInTargetStatus; });
+          var notInKeys = notInTarget.map(function (s) { return s.issueKey + " (" + s.currentStatus + ")"; }).join(", ");
+          
+          showWarningDialog(
+            "Some Issues Already in Target Status",
+            "Some issues are already in '" + def.label + "' status:\\n" + alreadyInKeys + 
+            "\\n\\nIssues that will be transitioned:\\n" + notInKeys + "\\n\\nDo you want to proceed?",
+            function () { executeJiraAction(btn, def); },
+            function () { setAllButtonsDisabled(false); }
+          );
+          return;
+        }
+
+        // All checks passed, proceed with action
+        executeJiraAction(btn, def);
+      }
+    );
+  }
+
+  function executeJiraAction(btn, def) {
     setAllButtonsDisabled(true);
 
     var text = getMRTitleText() + "\n" + getMRDescriptionText();
@@ -358,6 +467,8 @@
             urls: issueKeys.map(function (key) { return _jiraBaseUrl + "/browse/" + key; })
           });
         }
+        
+        setAllButtonsDisabled(false);
       }
     );
   }
@@ -392,6 +503,170 @@
         if (toast.parentNode) toast.parentNode.removeChild(toast);
       }, 400);
     }, 6000);
+  }
+
+  function showWarningDialog(title, message, onConfirm, onCancel) {
+    // Create overlay
+    var overlay = document.createElement("div");
+    overlay.className = "jira-warning-overlay";
+    overlay.style.cssText = [
+      "position: fixed",
+      "top: 0",
+      "left: 0",
+      "width: 100%",
+      "height: 100%",
+      "background: rgba(0,0,0,0.5)",
+      "z-index: 999998",
+      "display: flex",
+      "align-items: center",
+      "justify-content: center"
+    ].join(";");
+
+    // Create dialog
+    var dialog = document.createElement("div");
+    dialog.style.cssText = [
+      "background: white",
+      "padding: 24px",
+      "border-radius: 8px",
+      "max-width: 500px",
+      "margin: 20px",
+      "box-shadow: 0 8px 32px rgba(0,0,0,0.3)",
+      "font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+    ].join(";");
+
+    // Title
+    var titleEl = document.createElement("h3");
+    titleEl.textContent = title;
+    titleEl.style.cssText = [
+      "margin: 0 0 16px 0",
+      "font-size: 18px",
+      "font-weight: 600",
+      "color: #ff6b35"
+    ].join(";");
+
+    // Message
+    var messageEl = document.createElement("p");
+    messageEl.textContent = message.replace(/\\n/g, "\n");
+    messageEl.style.cssText = [
+      "margin: 0 0 24px 0",
+      "font-size: 14px",
+      "line-height: 1.5",
+      "color: #333",
+      "white-space: pre-wrap"
+    ].join(";");
+
+    // Buttons container
+    var buttonsContainer = document.createElement("div");
+    buttonsContainer.style.cssText = [
+      "display: flex",
+      "gap: 12px",
+      "justify-content: flex-end"
+    ].join(";");
+
+    // Cancel button
+    var cancelBtn = document.createElement("button");
+    cancelBtn.textContent = "Cancel";
+    cancelBtn.style.cssText = [
+      "padding: 8px 16px",
+      "border: 1px solid #ccc",
+      "background: white",
+      "color: #333",
+      "border-radius: 4px",
+      "cursor: pointer",
+      "font-size: 14px"
+    ].join(";");
+
+    // Confirm button
+    var confirmBtn = document.createElement("button");
+    confirmBtn.textContent = "Proceed";
+    confirmBtn.style.cssText = [
+      "padding: 8px 16px",
+      "border: none",
+      "background: #ff6b35",
+      "color: white",
+      "border-radius: 4px",
+      "cursor: pointer",
+      "font-size: 14px"
+    ].join(";");
+
+    // Event handlers
+    var cleanup = function () {
+      if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+    };
+
+    cancelBtn.addEventListener("click", function () {
+      cleanup();
+      if (onCancel) onCancel();
+    });
+
+    confirmBtn.addEventListener("click", function () {
+      cleanup();
+      if (onConfirm) onConfirm();
+    });
+
+    overlay.addEventListener("click", function (e) {
+      if (e.target === overlay) {
+        cleanup();
+        if (onCancel) onCancel();
+      }
+    });
+
+    // Assemble dialog
+    buttonsContainer.appendChild(cancelBtn);
+    buttonsContainer.appendChild(confirmBtn);
+    dialog.appendChild(titleEl);
+    dialog.appendChild(messageEl);
+    dialog.appendChild(buttonsContainer);
+    overlay.appendChild(dialog);
+    
+    document.body.appendChild(overlay);
+    
+    // Focus confirm button
+    confirmBtn.focus();
+  }
+
+  function updateWarningIndicators() {
+    var container = document.getElementById(CONTAINER_ID);
+    if (!container) return;
+
+    var text = getMRTitleText() + "\n" + getMRDescriptionText();
+    var issueKeys = extractJiraKeys(text);
+
+    if (issueKeys.length === 0) return;
+
+    // Check each button that has a transition
+    var btns = container.querySelectorAll("button[data-btn-label]");
+    for (var i = 0; i < btns.length; i++) {
+      var btn = btns[i];
+      var label = btn.dataset.btnLabel;
+      var transitionName = btn.dataset.transitionName;
+      
+      // Skip buttons without transitions
+      if (!transitionName) continue;
+
+      // Check if issues are already in this status
+      chrome.runtime.sendMessage(
+        {
+          action: "checkIssueStatuses",
+          issueKeys: issueKeys,
+          targetStatus: label
+        },
+        (function (button) {
+          return function (response) {
+            if (!response || response.errors) return;
+            
+            var indicator = button.querySelector(".warning-indicator");
+            if (!indicator) return;
+
+            var hasIssuesInTarget = response.statuses && response.statuses.some(function (s) {
+              return s.isInTargetStatus;
+            });
+
+            indicator.style.display = hasIssuesInTarget ? "block" : "none";
+          };
+        })(btn)
+      );
+    }
   }
 
   // --- Injection (SPA-aware) ---
