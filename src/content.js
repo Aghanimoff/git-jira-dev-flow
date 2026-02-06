@@ -7,6 +7,17 @@
   var MR_PATH_RE = /\/merge_requests\/\d+/;
   var EXT_NAME = "Git&Jira deroutine Dev Flow";
 
+  // Safe wrapper: if the extension was reloaded, chrome.runtime is invalidated
+  // and sendMessage throws synchronously. Catch that and remove stale UI.
+  function safeSendMessage(msg, callback) {
+    try {
+      chrome.runtime.sendMessage(msg, callback);
+    } catch (e) {
+      removeButtons();
+      showToast("Extension was reloaded. Please refresh the page.", true);
+    }
+  }
+
   var _worklogEnabled = false;
   var _autoOpenJira = false;
   var _jiraBaseUrl = "";
@@ -318,7 +329,7 @@
       return;
     }
 
-    chrome.runtime.sendMessage(
+    safeSendMessage(
       {
         action: "checkIssueStatuses",
         issueKeys: issueKeys,
@@ -402,7 +413,7 @@
       }
     }
 
-    chrome.runtime.sendMessage(
+    safeSendMessage(
       {
         action: "processJiraAction",
         issueKeys: issueKeys,
@@ -428,7 +439,7 @@
         showToast(parts.join(" | "), response.failed > 0);
 
         if (_autoOpenJira && _jiraBaseUrl) {
-          chrome.runtime.sendMessage({
+          safeSendMessage({
             action: "openJiraTabs",
             urls: issueKeys.map(function (key) { return _jiraBaseUrl + "/browse/" + key; })
           });
@@ -511,7 +522,7 @@
       if (!transitionName) continue;
 
       // Check if issues are already in this status
-      chrome.runtime.sendMessage(
+      safeSendMessage(
         {
           action: "checkIssueStatuses",
           issueKeys: issueKeys,
