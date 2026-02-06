@@ -1,0 +1,44 @@
+{
+  "buttons": [
+    {
+      "label": "CodeReview",
+      "transitionName": "",
+      "color": "rgb(85, 85, 85)",
+      "worklogComment": "Code Review",
+      "mrStatus": "open",
+      "branches": "develop"
+    },
+    {
+      "label": "Bugfix",
+      "transitionName": "bugfix",
+      "color": "rgb(83, 46, 22)",
+      "worklogComment": "Code Review (bugfix)",
+      "mrStatus": "open",
+      "branches": "develop"
+    },
+    {
+      "label": "Internal Test",
+      "transitionName": "internal test",
+      "color": "rgb(99, 166, 233)",
+      "worklogComment": "Release to Dev",
+      "mrStatus": "merged",
+      "branches": "develop"
+    },
+    {
+      "label": "Test Control",
+      "transitionName": "test control",
+      "color": "rgb(99, 166, 233)",
+      "worklogComment": "Release to Test",
+      "mrStatus": "merged",
+      "branches": "stage"
+    },
+    {
+      "label": "Done",
+      "transitionName": "done",
+      "color": "rgb(99, 166, 233)",
+      "worklogComment": "Release to Master",
+      "mrStatus": "merged",
+      "branches": "master"
+    }
+  ]
+}

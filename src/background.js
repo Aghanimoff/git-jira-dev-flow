@@ -21,13 +21,10 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
     }
 
     chrome.storage.local.get(["jiraBaseUrl", "username", "password"], function (cfg) {
-      if (!cfg.jiraBaseUrl || !cfg.username || !cfg.password) {
-        sendResponse({ allInTargetStatus: false, statuses: [], errors: ["Jira credentials not configured."] });
-        return;
-      }
-
-      var baseUrl = cfg.jiraBaseUrl.replace(/\/+$/, "");
+      console.log("[JiraDevFlow][background.js] Credentials used:", cfg);
+      var baseUrl = cfg.jiraBaseUrl ? cfg.jiraBaseUrl.replace(/\/+$/, "") : "";
       var authHeader = "Basic " + btoa(cfg.username + ":" + cfg.password);
+      console.log("[JiraDevFlow][background.js] Authorization header:", authHeader);
       
       checkIssueStatuses(baseUrl, authHeader, issueKeys, targetStatus, sendResponse);
     });
@@ -46,13 +43,10 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
   }
 
   chrome.storage.local.get(["jiraBaseUrl", "username", "password"], function (cfg) {
-    if (!cfg.jiraBaseUrl || !cfg.username || !cfg.password) {
-      sendResponse({ success: 0, failed: issueKeys.length, errors: ["Jira credentials not configured. Open extension options."] });
-      return;
-    }
-
-    var baseUrl = cfg.jiraBaseUrl.replace(/\/+$/, "");
+    console.log("[JiraDevFlow][background.js] Credentials used:", cfg);
+    var baseUrl = cfg.jiraBaseUrl ? cfg.jiraBaseUrl.replace(/\/+$/, "") : "";
     var authHeader = "Basic " + btoa(cfg.username + ":" + cfg.password);
+    console.log("[JiraDevFlow][background.js] Authorization header:", authHeader);
     var results = { success: 0, failed: 0, errors: [] };
 
     // --- Transition ops (parallel) ---

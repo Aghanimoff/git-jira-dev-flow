@@ -2,36 +2,94 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Git&Jira deroutine Dev Flow — Options</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Git&Jira deroutine Dev Flow - Settings</title>
   <link rel="stylesheet" href="options.css" />
 </head>
 <body>
-  <div class="container">
-    <h1>Git&Jira deroutine Dev Flow — Settings</h1>
+  <main class="page">
+    <header class="page-header">
+      <h1>Git&Jira deroutine Dev Flow</h1>
+      <p class="subtitle">Configure Jira access and GitLab MR action buttons.</p>
+    </header>
 
-    <label for="jiraBaseUrl">Jira Base URL</label>
-    <input id="jiraBaseUrl" type="url" placeholder="https://jira.example.com" />
+    <nav class="tabs" aria-label="Settings sections">
+      <button class="tab-btn active" data-tab="general" type="button">General</button>
+      <button class="tab-btn" data-tab="buttons" type="button">Buttons</button>
+    </nav>
 
-    <label for="username">Username</label>
-    <input id="username" type="text" placeholder="your.username" />
+    <section class="tab-content" id="tab-general">
+      <div class="panel">
+        <label class="field" for="jiraBaseUrl">
+          <span>Jira Base URL</span>
+          <input id="jiraBaseUrl" type="url" placeholder="https://company.atlassian.net" />
+        </label>
 
-    <label for="password">Password / API Token</label>
-    <input id="password" type="password" placeholder="password or token" />
+        <label class="field" for="username">
+          <span>Username</span>
+          <input id="username" type="text" placeholder="name@company.com" />
+        </label>
 
-    <div class="checkbox-row">
-      <input id="worklogEnabled" type="checkbox" />
-      <label for="worklogEnabled">Jira worklog tracking</label>
-    </div>
+        <label class="field" for="password">
+          <span>Password / API Token</span>
+          <input id="password" type="password" />
+        </label>
 
-    <div class="checkbox-row">
-      <input id="autoOpenJira" type="checkbox" />
-      <label for="autoOpenJira">Auto open Jira task</label>
-    </div>
+        <div class="checkbox-group">
+          <label class="checkbox-row" for="worklogEnabled">
+            <input id="worklogEnabled" type="checkbox" />
+            <span>Jira worklog tracking</span>
+          </label>
 
-    <button id="save">Save</button>
-    <div id="status"></div>
-  </div>
+          <label class="checkbox-row" for="autoOpenJira">
+            <input id="autoOpenJira" type="checkbox" />
+            <span>Auto open Jira task</span>
+          </label>
+        </div>
+
+        <div class="actions-row">
+          <button id="save" data-save-settings type="button">Save settings</button>
+          <p id="status" class="status" role="status" aria-live="polite"></p>
+        </div>
+
+        <div class="conn-status" id="connStatus" role="status" aria-live="polite"></div>
+      </div>
+    </section>
+
+    <section class="tab-content" id="tab-buttons" hidden>
+      <div class="panel">
+        <p class="hint">
+          Configure which buttons appear on GitLab MR pages.
+          The <code>branches</code> field accepts comma-separated values.
+        </p>
+
+        <div class="buttons-table-wrap">
+          <table class="buttons-table">
+            <thead>
+              <tr>
+                <th>Label</th>
+                <th>Transition</th>
+                <th>Color</th>
+                <th>Worklog</th>
+                <th>Status</th>
+                <th>Branches</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="buttons-list"></tbody>
+          </table>
+        </div>
+
+        <div class="actions-row">
+          <button id="addBtn" class="btn-secondary" type="button">Add button</button>
+          <button id="saveButtons" data-save-settings type="button">Save settings</button>
+          <p id="statusButtons" class="status" role="status" aria-live="polite"></p>
+        </div>
+      </div>
+    </section>
+  </main>
 
   <script src="options.js"></script>
 </body>
 </html>
+

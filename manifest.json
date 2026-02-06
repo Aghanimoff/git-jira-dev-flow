@@ -36,5 +36,11 @@
     "16": "src/icons/icon-16-transp.png",
     "48": "src/icons/icon-48-transp.png",
     "128": "src/icons/icon-128-transp.png"
-  }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["src/defaults.json"],
+      "matches": ["<all_urls>"]
+    }
+  ]
 }

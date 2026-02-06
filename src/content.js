@@ -21,21 +21,44 @@
   var _worklogEnabled = false;
   var _autoOpenJira = false;
   var _jiraBaseUrl = "";
+  var BUTTONS = [];
+  var _configReady = false;
 
-  chrome.storage.local.get(["worklogEnabled", "autoOpenJira", "jiraBaseUrl"], function (data) {
-    _worklogEnabled = !!data.worklogEnabled;
-    _autoOpenJira = !!data.autoOpenJira;
-    _jiraBaseUrl = (data.jiraBaseUrl || "").replace(/\/+$/, "");
-  });
+  // Convert flat storage format → internal format used by the extension
+  function parseButtons(arr) {
+    return (arr || []).map(function (b) {
+      var branches = (b.branches || "").split(",").map(function (s) { return s.trim().toLowerCase(); }).filter(Boolean);
+      return {
+        label: b.label || "",
+        transitionName: b.transitionName || null,
+        color: b.color || "rgb(99, 166, 233)",
+        worklogComment: b.worklogComment || "",
+        visibility: { status: (b.mrStatus || "open").toLowerCase(), branches: branches }
+      };
+    });
+  }
 
-  // { label, transitionName (null = no transition), color, worklogComment, visibility }
-  var BUTTONS = [
-    { label: "CodeReview",    transitionName: null,            color: "rgb(85, 85, 85)",   worklogComment: "Code Review",          visibility: { status: "open",   branches: ["develop"] } },
-    { label: "Bugfix",        transitionName: "bugfix",        color: "rgb(83, 46, 22)",   worklogComment: "Code Review (bugfix)", visibility: { status: "open",   branches: ["develop"] } },
-    { label: "Internal Test", transitionName: "internal test", color: "rgb(99, 166, 233)", worklogComment: "Release to Dev",       visibility: { status: "merged", branches: ["develop"] } },
-    { label: "Test Control",  transitionName: "test control",  color: "rgb(99, 166, 233)", worklogComment: "Release to Test",      visibility: { status: "merged", branches: ["stage"] } },
-    { label: "Done",          transitionName: "done",          color: "rgb(99, 166, 233)", worklogComment: "Release to Master",    visibility: { status: "merged", branches: ["master"] } }
-  ];
+  // Load config: storage first, then defaults.json as fallback
+  function loadConfig(callback) {
+    chrome.storage.local.get(["worklogEnabled", "autoOpenJira", "jiraBaseUrl", "buttons"], function (data) {
+      _worklogEnabled = !!data.worklogEnabled;
+      _autoOpenJira = !!data.autoOpenJira;
+      _jiraBaseUrl = (data.jiraBaseUrl || "").replace(/\/+$/, "");
+
+      if (data.buttons && data.buttons.length > 0) {
+        BUTTONS = parseButtons(data.buttons);
+        _configReady = true;
+        callback();
+      } else {
+        // First run or reset — load defaults.json
+        fetch(chrome.runtime.getURL("src/defaults.json"))
+          .then(function (r) { return r.json(); })
+          .then(function (defs) { BUTTONS = parseButtons(defs.buttons); })
+          .catch(function () { BUTTONS = []; })
+          .finally(function () { _configReady = true; callback(); });
+      }
+    });
+  }
 
   // --- MR state detection ---
 
@@ -594,18 +617,23 @@
 
   var lastUrl = window.location.href;
 
-  var observer = new MutationObserver(function () {
-    if (window.location.href !== lastUrl) {
-      lastUrl = window.location.href;
-      removeButtons();
-      resetVisibilityState();
-      setTimeout(injectButtons, 800);
-    }
-    if (isMRPage() && !document.getElementById(CONTAINER_ID)) {
-      injectButtons();
-    }
-  });
+  function startObserver() {
+    var observer = new MutationObserver(function () {
+      if (window.location.href !== lastUrl) {
+        lastUrl = window.location.href;
+        removeButtons();
+        resetVisibilityState();
+        setTimeout(injectButtons, 800);
+      }
+      if (isMRPage() && !document.getElementById(CONTAINER_ID)) {
+        injectButtons();
+      }
+    });
 
-  observer.observe(document.body, { childList: true, subtree: true });
-  injectButtons();
+    observer.observe(document.body, { childList: true, subtree: true });
+    injectButtons();
+  }
+
+  // --- Bootstrap: load config then start ---
+  loadConfig(startObserver);
 })();
