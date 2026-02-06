@@ -5,7 +5,7 @@
 
   var CONTAINER_ID = "jira-status-mover-container";
   var MR_PATH_RE = /\/merge_requests\/\d+/;
-  var EXT_NAME = "GitLab MR → Jira Status Mover";
+  var EXT_NAME = "Git&Jira deroutine Dev Flow";
 
   // Loaded once from chrome.storage
   var _worklogEnabled = false;
