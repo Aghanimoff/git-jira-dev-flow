@@ -7,11 +7,12 @@
   var usernameInput = document.getElementById("username");
   var passwordInput = document.getElementById("password");
   var worklogCheckbox = document.getElementById("worklogEnabled");
+  var autoOpenCheckbox = document.getElementById("autoOpenJira");
   var saveBtn = document.getElementById("save");
   var statusEl = document.getElementById("status");
 
   // Load saved values
-  chrome.storage.local.get(["jiraBaseUrl", "username", "password", "worklogEnabled"], function (data) {
+  chrome.storage.local.get(["jiraBaseUrl", "username", "password", "worklogEnabled", "autoOpenJira"], function (data) {
     if (data.jiraBaseUrl) {
       jiraBaseUrlInput.value = data.jiraBaseUrl;
     }
@@ -22,6 +23,7 @@
       passwordInput.value = data.password;
     }
     worklogCheckbox.checked = !!data.worklogEnabled;
+    autoOpenCheckbox.checked = !!data.autoOpenJira;
   });
 
   saveBtn.addEventListener("click", function () {
@@ -40,7 +42,8 @@
         "jiraBaseUrl": jiraBaseUrl,
         "username": username,
         "password": password,
-        "worklogEnabled": worklogCheckbox.checked
+        "worklogEnabled": worklogCheckbox.checked,
+        "autoOpenJira": autoOpenCheckbox.checked
       },
       function () {
         statusEl.textContent = "Settings saved!";

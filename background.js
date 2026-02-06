@@ -1,6 +1,18 @@
 // background.js — Service Worker for Jira transition + worklog calls
 
 chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
+  if (message.action === "openJiraTabs") {
+    var tabIndex = (sender.tab && sender.tab.index != null) ? sender.tab.index + 1 : undefined;
+    (message.urls || []).forEach(function (url, i) {
+      var opts = { url: url, active: (i === 0) };
+      if (tabIndex !== undefined) {
+        opts.index = tabIndex + i;
+      }
+      chrome.tabs.create(opts);
+    });
+    return false;
+  }
+
   if (message.action !== "processJiraAction") {
     return false;
   }

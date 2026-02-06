@@ -9,10 +9,14 @@
 
   // Loaded once from chrome.storage
   var _worklogEnabled = false;
+  var _autoOpenJira = false;
+  var _jiraBaseUrl = "";
 
-  // Load worklog setting once at startup
-  chrome.storage.local.get(["worklogEnabled"], function (data) {
+  // Load settings once at startup
+  chrome.storage.local.get(["worklogEnabled", "autoOpenJira", "jiraBaseUrl"], function (data) {
     _worklogEnabled = !!data.worklogEnabled;
+    _autoOpenJira = !!data.autoOpenJira;
+    _jiraBaseUrl = (data.jiraBaseUrl || "").replace(/\/+$/, "");
   });
 
   // ---- Inject CSS animation keyframes once ----
@@ -375,6 +379,16 @@
           }
 
           showToast(parts.join(" | "), response.failed > 0);
+
+          // Auto-open Jira tasks if enabled
+          if (_autoOpenJira && _jiraBaseUrl) {
+            chrome.runtime.sendMessage({
+              action: "openJiraTabs",
+              urls: issueKeys.map(function (key) {
+                return _jiraBaseUrl + "/browse/" + key;
+              })
+            });
+          }
           // keep button disabled after action — one-shot
         }
       );
