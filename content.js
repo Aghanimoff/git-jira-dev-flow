@@ -219,6 +219,11 @@
 
     if (_worklogEnabled) {
       container.appendChild(createMinutesInput());
+      var minLabel = document.createElement("span");
+      minLabel.textContent = "min to worklog";
+      minLabel.style.fontSize = "12px";
+      minLabel.style.color = "#666";
+      container.appendChild(minLabel);
     }
 
     BUTTONS.forEach(function (def) {
