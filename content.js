@@ -26,14 +26,141 @@
     document.head.appendChild(style);
   })();
 
-  // Button definitions: label, Jira transition name (null = no transition), CSS color, worklog comment
+  // Button definitions: label, Jira transition name (null = no transition), CSS color, worklog comment, visibility rule
   var BUTTONS = [
-    { label: "CodeReview",    transitionName: null,            color: "rgb(85, 85, 85)",   worklogComment: "Code Review" },
-    { label: "Bugfix",        transitionName: "bugfix",        color: "rgb(83, 46, 22)",   worklogComment: "Code Review (bugfix)" },
-    { label: "Internal Test", transitionName: "internal test", color: "rgb(99, 166, 233)", worklogComment: "Release to Dev" },
-    { label: "Test Control",  transitionName: "test control",  color: "rgb(99, 166, 233)", worklogComment: "Release to Test" },
-    { label: "Done",          transitionName: "done",          color: "rgb(99, 166, 233)", worklogComment: "Release to Master" }
+    { label: "CodeReview",    transitionName: null,            color: "rgb(85, 85, 85)",   worklogComment: "Code Review",              visibility: { status: "open",   branches: ["develop"] } },
+    { label: "Bugfix",        transitionName: "bugfix",        color: "rgb(83, 46, 22)",   worklogComment: "Code Review (bugfix)",     visibility: { status: "open",   branches: ["develop"] } },
+    { label: "Internal Test", transitionName: "internal test", color: "rgb(99, 166, 233)", worklogComment: "Release to Dev",           visibility: { status: "merged", branches: ["develop"] } },
+    { label: "Test Control",  transitionName: "test control",  color: "rgb(99, 166, 233)", worklogComment: "Release to Test",          visibility: { status: "merged", branches: ["stage"] } },
+    { label: "Done",          transitionName: "done",          color: "rgb(99, 166, 233)", worklogComment: "Release to Master",        visibility: { status: "merged", branches: ["master"] } }
   ];
+
+  // ---- MR state detection ----
+
+  function detectMRStatus() {
+    // 1. Class-based detection (classic GitLab)
+    if (document.querySelector(".status-box-mr-merged, .status-box.status-box-merged")) return "merged";
+    if (document.querySelector(".status-box-open, .status-box.status-box-open")) return "open";
+    if (document.querySelector(".status-box-closed, .status-box.status-box-closed")) return "closed";
+
+    // 2. Search all badge elements for status text (modern GitLab)
+    var badges = document.querySelectorAll(".badge");
+    for (var i = 0; i < badges.length; i++) {
+      var t = (badges[i].textContent || "").trim().toLowerCase();
+      if (t === "merged") return "merged";
+      if (t === "open") return "open";
+      if (t === "closed") return "closed";
+    }
+
+    return null;
+  }
+
+  function detectTargetBranch() {
+    // 1. .js-target-branch (classic GitLab)
+    var el = document.querySelector(".js-target-branch");
+    if (el) return (el.textContent || "").trim().toLowerCase();
+
+    // 2. ref-name elements — second one is typically target branch
+    var refs = document.querySelectorAll(".ref-name");
+    if (refs.length >= 2) return (refs[1].textContent || "").trim().toLowerCase();
+
+    // 3. data-testid target branch link
+    var testEl = document.querySelector("[data-testid='target-branch-link']");
+    if (testEl) return (testEl.textContent || "").trim().toLowerCase();
+
+    // 4. Parse branch from tree links in MR page header area
+    //    Pattern: links to /-/tree/<branch> — last one is typically target branch
+    var branchLinks = document.querySelectorAll("a[href*='/-/tree/']");
+    if (branchLinks.length >= 2) {
+      // Last tree link is target branch (skip nav "Repository" links by checking text)
+      var target = null;
+      for (var b = branchLinks.length - 1; b >= 0; b--) {
+        var text = (branchLinks[b].textContent || "").trim();
+        if (text && text.toLowerCase() !== "repository") {
+          target = text.toLowerCase();
+          break;
+        }
+      }
+      if (target) {
+        return target;
+      }
+    }
+
+    return null;
+  }
+
+  // ---- Button visibility management ----
+
+  var _visibilityTimer = null;
+  var _visibilityRetries = 0;
+  var MAX_VISIBILITY_RETRIES = 20; // 20 × 500ms = 10 seconds of retries
+  var _lastDetectedStatus = null;
+  var _lastDetectedBranch = null;
+
+  function updateButtonVisibility() {
+    var container = document.getElementById(CONTAINER_ID);
+    if (!container) return;
+
+    var status = detectMRStatus();
+    var targetBranch = detectTargetBranch();
+
+    // If state not yet available, schedule retry
+    if (!status || !targetBranch) {
+      if (_visibilityRetries < MAX_VISIBILITY_RETRIES) {
+        _visibilityRetries++;
+        clearTimeout(_visibilityTimer);
+        _visibilityTimer = setTimeout(updateButtonVisibility, 500);
+      } else {
+        // Fallback after timeout: show all buttons
+        applyVisibility(container, null, null);
+      }
+      return;
+    }
+
+    // State detected — cache it and apply
+    _lastDetectedStatus = status;
+    _lastDetectedBranch = targetBranch;
+    _visibilityRetries = 0;
+    clearTimeout(_visibilityTimer);
+
+    applyVisibility(container, status, targetBranch);
+  }
+
+  function applyVisibility(container, status, targetBranch) {
+    var btns = container.querySelectorAll("button[data-btn-label]");
+    var anyVisible = false;
+
+    for (var i = 0; i < btns.length; i++) {
+      var label = btns[i].dataset.btnLabel;
+      var def = null;
+      for (var j = 0; j < BUTTONS.length; j++) {
+        if (BUTTONS[j].label === label) { def = BUTTONS[j]; break; }
+      }
+      if (!def) continue;
+
+      var show;
+      if (!status || !targetBranch) {
+        // Fallback: show everything
+        show = true;
+      } else {
+        show = def.visibility.status === status &&
+               def.visibility.branches.indexOf(targetBranch) !== -1;
+      }
+
+      btns[i].style.display = show ? "" : "none";
+      if (show) anyVisible = true;
+    }
+
+    // Show/hide container (label + input + buttons)
+    container.style.display = anyVisible ? "inline-flex" : "none";
+  }
+
+  function resetVisibilityRetries() {
+    _visibilityRetries = 0;
+    _lastDetectedStatus = null;
+    _lastDetectedBranch = null;
+    clearTimeout(_visibilityTimer);
+  }
 
   // ---- Time distribution ----
 
@@ -108,7 +235,7 @@
   function createButtonContainer() {
     var container = document.createElement("span");
     container.id = CONTAINER_ID;
-    container.style.display = "inline-flex";
+    container.style.display = "none";
     container.style.gap = "6px";
     container.style.marginLeft = "auto";
     container.style.flexWrap = "wrap";
@@ -160,6 +287,8 @@
     btn.style.border = "none";
     btn.style.cursor = "pointer";
     btn.dataset.transitionName = def.transitionName;
+    btn.dataset.btnLabel = def.label;
+    btn.style.display = "none"; // hidden until visibility is determined
 
     var textSpan = document.createElement("span");
     textSpan.className = "gl-button-text";
@@ -296,6 +425,7 @@
       var mediaBody = summaryRow.closest(".media-body");
       if (mediaBody) {
         mediaBody.appendChild(createButtonContainer());
+        updateButtonVisibility();
         return;
       }
     }
@@ -306,9 +436,11 @@
       var mediaBody = approveBtn.closest(".media-body");
       if (mediaBody) {
         mediaBody.appendChild(createButtonContainer());
+        updateButtonVisibility();
         return;
       }
       approveBtn.parentNode.appendChild(createButtonContainer());
+      updateButtonVisibility();
       return;
     }
 
@@ -319,12 +451,14 @@
       var actions = approvalsSection.querySelector(".state-container-action-buttons");
       if (actions) {
         actions.prepend(createButtonContainer());
+        updateButtonVisibility();
         return;
       }
       // Any mr-widget-body inside approvals
       var widgetBody = approvalsSection.querySelector(".mr-widget-body");
       if (widgetBody) {
         widgetBody.appendChild(createButtonContainer());
+        updateButtonVisibility();
         return;
       }
     }
@@ -348,16 +482,24 @@
     if (window.location.href !== lastUrl) {
       lastUrl = window.location.href;
       removeButtons();
+      resetVisibilityRetries();
       // Small delay to let GitLab render the new page
       setTimeout(injectButtons, 800);
     }
   }
+
+  var _visDebounce = null;
 
   var observer = new MutationObserver(function () {
     onUrlChange();
     // Also try inject if we are on MR page but buttons are missing (DOM re-render)
     if (isMRPage() && !document.getElementById(CONTAINER_ID)) {
       injectButtons();
+    }
+    // Re-check visibility (debounced) in case MR state DOM appeared
+    if (isMRPage() && document.getElementById(CONTAINER_ID)) {
+      clearTimeout(_visDebounce);
+      _visDebounce = setTimeout(updateButtonVisibility, 300);
     }
   });
 
