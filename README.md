@@ -8,11 +8,13 @@ Chrome extension that streamlines developer workflow between GitLab and Jira.
 ![Extension buttons on MR page](docs/screenshot-button-1.png)
 - **Automatic worklog tracking** - distributes time across linked issues
 ![Release button with worklog](docs/screenshot-button-2.png)
-
+- **Smart time rounding** - worklog is rounded up to the 5 minutes
+- **Worklog overlap prevention** - searching for existing worklogs and adjusting new worklog separately
+- **Status pre-check** - warns you if issues are already in the target status
 
 ## Setup
 1. Install Chrome extension from [Chrome Web Store (Will be later maybe)](https://chromewebstore.google.com/detail/TODO) or load unpacked from source
-2. Open extension settings and configure your Jira instance URL, username, or API token
+2. Open extension settings and configure your Jira instance URL, username, or API token  
 ![Settings page](docs/screenshot-settings.png)
 
 
@@ -31,17 +33,6 @@ Chrome extension that streamlines developer workflow between GitLab and Jira.
 ## More information in tooltips
 ![Tooltip with issue details](docs/screenshot-tooltip.png)
 
-## Privacy
-
-This extension:
-- Stores Jira credentials locally in `chrome.storage.local` (never transmitted to third parties)
-- Communicates only with your configured Jira instance
-- Does not collect analytics or telemetry
-
 ## Contributing
 
 Contributions are welcome! Please open an issue or submit a pull request on GitHub.
-
-## License
-
-MIT
