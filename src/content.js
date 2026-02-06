@@ -394,10 +394,12 @@
     if (_worklogEnabled) {
       var minutesInput = document.getElementById("jira-worklog-minutes");
       var totalMinutes = parseInt(minutesInput ? minutesInput.value : "5", 10) || 0;
-      var allocations = distributeMinutes(totalMinutes, issueKeys.length);
-      worklogs = issueKeys.map(function (key, idx) {
-        return { issueKey: key, minutes: allocations[idx], comment: def.worklogComment };
-      });
+      if (totalMinutes > 0) {
+        var allocations = distributeMinutes(totalMinutes, issueKeys.length);
+        worklogs = issueKeys.map(function (key, idx) {
+          return { issueKey: key, minutes: allocations[idx], comment: def.worklogComment };
+        });
+      }
     }
 
     chrome.runtime.sendMessage(
