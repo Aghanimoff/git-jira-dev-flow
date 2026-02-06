@@ -14,6 +14,7 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
   if (message.action === "checkIssueStatuses") {
     var issueKeys = message.issueKeys || [];
     var targetStatus = message.targetStatus || "";
+    var targetStatuses = message.targetStatuses || [];
 
     if (issueKeys.length === 0) {
       sendResponse({ allInTargetStatus: false, statuses: [], errors: ["No issue keys provided."] });
@@ -26,7 +27,7 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
       var authHeader = "Basic " + btoa(cfg.username + ":" + cfg.password);
       console.log("[JiraDevFlow][background.js] Authorization header:", authHeader);
       
-      checkIssueStatuses(baseUrl, authHeader, issueKeys, targetStatus, sendResponse);
+      checkIssueStatuses(baseUrl, authHeader, issueKeys, targetStatus, targetStatuses, sendResponse);
     });
     return true;
   }
@@ -119,16 +120,27 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
   return true;
 });
 
-function checkIssueStatuses(baseUrl, authHeader, issueKeys, targetStatus, sendResponse) {
+function checkIssueStatuses(baseUrl, authHeader, issueKeys, targetStatus, targetStatuses, sendResponse) {
   var results = { allInTargetStatus: true, statuses: [], errors: [] };
   var pending = issueKeys.length;
+  var normalizedTargets = (Array.isArray(targetStatuses) ? targetStatuses : [])
+    .concat([targetStatus || ""])
+    .map(function (s) { return String(s || "").trim().toLowerCase(); })
+    .filter(Boolean)
+    .filter(function (s, idx, arr) { return arr.indexOf(s) === idx; });
+
+  if (normalizedTargets.length === 0) {
+    sendResponse({ allInTargetStatus: false, statuses: [], errors: ["No target status provided."] });
+    return;
+  }
+
   if (pending === 0) { sendResponse(results); return; }
 
   issueKeys.forEach(function (key) {
     jiraFetch(baseUrl, authHeader, "/rest/api/2/issue/" + key + "?fields=status")
       .then(function (data) {
         var cur = (data.fields && data.fields.status && data.fields.status.name) || "Unknown";
-        var match = cur.toLowerCase() === targetStatus.toLowerCase();
+        var match = normalizedTargets.indexOf(cur.toLowerCase()) !== -1;
         results.statuses.push({ issueKey: key, currentStatus: cur, isInTargetStatus: match });
         if (!match) results.allInTargetStatus = false;
         if (--pending <= 0) sendResponse(results);

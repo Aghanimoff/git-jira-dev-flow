@@ -28,9 +28,12 @@
   function parseButtons(arr) {
     return (arr || []).map(function (b) {
       var branches = (b.branches || "").split(",").map(function (s) { return s.trim().toLowerCase(); }).filter(Boolean);
+      var transitionName = (b.transitionName || "").trim();
+      var targetStatus = (b.targetStatus || transitionName || b.label || "").trim();
       return {
         label: b.label || "",
-        transitionName: b.transitionName || null,
+        transitionName: transitionName || null,
+        targetStatus: targetStatus,
         color: b.color || "rgb(99, 166, 233)",
         worklogComment: b.worklogComment || "",
         visibility: { status: (b.mrStatus || "open").toLowerCase(), branches: branches }
@@ -292,13 +295,15 @@
     btn.style.border = "none";
     btn.style.cursor = "pointer";
     btn.style.position = "relative";
-    btn.dataset.transitionName = def.transitionName;
+    btn.dataset.transitionName = def.transitionName || "";
+    btn.dataset.targetStatus = def.targetStatus || "";
     btn.dataset.btnLabel = def.label;
     btn.style.display = "none";
 
     var tooltipLines = [];
+    var targetStatusName = def.targetStatus || def.transitionName || def.label;
     if (def.transitionName) {
-      tooltipLines.push("Move linked Jira issues to \"" + def.label + "\" status");
+      tooltipLines.push("Move linked Jira issues to \"" + targetStatusName + "\" status");
     } else {
       tooltipLines.push("Log time without changing Jira issue status");
     }
@@ -345,6 +350,11 @@
     
     var text = getMRTitleText() + "\n" + getMRDescriptionText();
     var issueKeys = extractJiraKeys(text);
+    var targetStatusName = def.targetStatus || def.transitionName || def.label;
+    var targetStatusNames = [def.targetStatus, def.transitionName, def.label]
+      .map(function (v) { return (v || "").trim(); })
+      .filter(Boolean)
+      .filter(function (v, idx, a) { return a.indexOf(v) === idx; });
 
     if (issueKeys.length === 0) {
       showToast("No Jira issue keys found in MR description / title.", true);
@@ -356,7 +366,8 @@
       {
         action: "checkIssueStatuses",
         issueKeys: issueKeys,
-        targetStatus: def.label
+        targetStatus: targetStatusName,
+        targetStatuses: targetStatusNames
       },
       function (response) {
         if (chrome.runtime.lastError) {
@@ -382,7 +393,7 @@
           var alreadyInStatus = response.statuses.map(function (s) { return s.issueKey; }).join(", ");
           showWarningDialog(
             "All Issues Already in Target Status",
-            "All linked issues are already in '" + def.label + "' status:\\n" + alreadyInStatus + "\\n\\nDo you want to proceed anyway?",
+            "All linked issues are already in '" + targetStatusName + "' status:\\n" + alreadyInStatus + "\\n\\nDo you want to proceed anyway?",
             function () { executeJiraAction(btn, def); },
             function () { setAllButtonsDisabled(false); }
           );
@@ -398,7 +409,7 @@
           
           showWarningDialog(
             "Some Issues Already in Target Status",
-            "Some issues are already in '" + def.label + "' status:\\n" + alreadyInKeys + 
+            "Some issues are already in '" + targetStatusName + "' status:\\n" + alreadyInKeys + 
             "\\n\\nIssues that will be transitioned:\\n" + notInKeys + "\\n\\nDo you want to proceed?",
             function () { executeJiraAction(btn, def); },
             function () { setAllButtonsDisabled(false); }
@@ -540,6 +551,11 @@
       var btn = btns[i];
       var label = btn.dataset.btnLabel;
       var transitionName = btn.dataset.transitionName;
+      var targetStatus = btn.dataset.targetStatus || transitionName || label;
+      var targetStatusNames = [btn.dataset.targetStatus, transitionName, label]
+        .map(function (v) { return (v || "").trim(); })
+        .filter(Boolean)
+        .filter(function (v, idx, a) { return a.indexOf(v) === idx; });
       
       // Skip buttons without transitions
       if (!transitionName) continue;
@@ -549,7 +565,8 @@
         {
           action: "checkIssueStatuses",
           issueKeys: issueKeys,
-          targetStatus: label
+          targetStatus: targetStatus,
+          targetStatuses: targetStatusNames
         },
         (function (button) {
           return function (response) {
