@@ -26,13 +26,35 @@
     document.head.appendChild(style);
   })();
 
-  // Button definitions: label shown on the button, Jira transition name, CSS color
+  // Button definitions: label, Jira transition name (null = no transition), CSS color, worklog comment
   var BUTTONS = [
-    { label: "Bugfix",        transitionName: "bugfix",        color: "rgb(83, 46, 22)"  },
-    { label: "Internal Test", transitionName: "internal test", color: "rgb(99, 166, 233)" },
-    { label: "Test Control",  transitionName: "test control",  color: "rgb(99, 166, 233)" },
-    { label: "Done",          transitionName: "done",          color: "rgb(99, 166, 233)" }
+    { label: "CodeReview",    transitionName: null,            color: "rgb(85, 85, 85)",   worklogComment: "Code Review" },
+    { label: "Bugfix",        transitionName: "bugfix",        color: "rgb(83, 46, 22)",   worklogComment: "Code Review (bugfix)" },
+    { label: "Internal Test", transitionName: "internal test", color: "rgb(99, 166, 233)", worklogComment: "Release to Dev" },
+    { label: "Test Control",  transitionName: "test control",  color: "rgb(99, 166, 233)", worklogComment: "Release to Test" },
+    { label: "Done",          transitionName: "done",          color: "rgb(99, 166, 233)", worklogComment: "Release to Master" }
   ];
+
+  // ---- Time distribution ----
+
+  // Distribute totalMinutes across count issues.
+  // Each allocation is rounded UP to the nearest multiple of 5 (min 5).
+  // Returns an array of minute values.
+  function distributeMinutes(totalMinutes, count) {
+    if (count <= 0) return [];
+    var allocations = [];
+    var remaining = totalMinutes;
+
+    for (var i = 0; i < count; i++) {
+      var share = remaining / (count - i);
+      var rounded = Math.ceil(share / 5) * 5;
+      if (rounded < 5) rounded = 5;
+      allocations.push(rounded);
+      remaining -= rounded;
+    }
+
+    return allocations;
+  }
 
   // ---- URL / key detection ----
 
@@ -100,6 +122,27 @@
     jiraLabel.style.color = "#333";
     container.appendChild(jiraLabel);
 
+    // Minutes input field
+    var minutesInput = document.createElement("input");
+    minutesInput.id = "jira-worklog-minutes";
+    minutesInput.type = "number";
+    minutesInput.min = "0";
+    minutesInput.step = "5";
+    minutesInput.value = "5";
+    minutesInput.title = "Minutes to log (distributed across issues)";
+    minutesInput.style.cssText = [
+      "width: 48px",
+      "height: 24px",
+      "padding: 2px 4px",
+      "font-size: 12px",
+      "text-align: center",
+      "border: 1px solid #ccc",
+      "border-radius: 4px",
+      "color: #333",
+      "background: #fff"
+    ].join(";");
+    container.appendChild(minutesInput);
+
     BUTTONS.forEach(function (def) {
       var btn = createSingleButton(def);
       container.appendChild(btn);
@@ -137,11 +180,21 @@
         return;
       }
 
+      // Read minutes from input and build worklog allocations
+      var minutesInput = document.getElementById("jira-worklog-minutes");
+      var totalMinutes = parseInt(minutesInput ? minutesInput.value : "5", 10) || 0;
+      var allocations = distributeMinutes(totalMinutes, issueKeys.length);
+
+      var worklogs = issueKeys.map(function (key, idx) {
+        return { issueKey: key, minutes: allocations[idx], comment: def.worklogComment };
+      });
+
       chrome.runtime.sendMessage(
         {
-          "action": "transitionJiraIssue",
+          "action": "processJiraAction",
           "issueKeys": issueKeys,
-          "transitionName": def.transitionName
+          "transitionName": def.transitionName,
+          "worklogs": worklogs
         },
         function (response) {
           if (chrome.runtime.lastError) {
