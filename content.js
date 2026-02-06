@@ -132,6 +132,9 @@
         ? true
         : def.visibility.status === status && def.visibility.branches.indexOf(targetBranch) !== -1;
 
+      // CodeReview is only useful with worklog enabled
+      if (!def.transitionName && !_worklogEnabled) show = false;
+
       btns[i].style.display = show ? "" : "none";
       if (show) anyVisible = true;
     }
@@ -214,7 +217,7 @@
     jiraLabel.textContent = "Jira:";
     jiraLabel.style.fontWeight = "600";
     jiraLabel.style.fontSize = "13px";
-    jiraLabel.style.color = "#333";
+    jiraLabel.style.color = "currentColor";
     container.appendChild(jiraLabel);
 
     if (_worklogEnabled) {
@@ -222,7 +225,10 @@
       var minLabel = document.createElement("span");
       minLabel.textContent = "min to worklog";
       minLabel.style.fontSize = "12px";
-      minLabel.style.color = "#666";
+      minLabel.style.color = "currentColor";
+      minLabel.style.opacity = "0.7";
+      minLabel.title = "Time will be logged to each linked Jira issue.\nIf multiple issues found, minutes are distributed evenly (rounded up to 5 min each).";
+      minLabel.style.cursor = "help";
       container.appendChild(minLabel);
     }
 
@@ -240,17 +246,18 @@
     input.min = "0";
     input.step = "5";
     input.value = "5";
-    input.title = "Minutes to log (distributed across issues)";
+    input.title = "Time will be logged to each linked Jira issue.\nIf multiple issues found, minutes are distributed evenly (rounded up to 5 min each).";
     input.style.cssText = [
       "width: 48px",
       "height: 24px",
       "padding: 2px 4px",
       "font-size: 12px",
       "text-align: center",
-      "border: 1px solid #ccc",
+      "border: 1px solid currentColor",
       "border-radius: 4px",
-      "color: #333",
-      "background: #fff"
+      "color: inherit",
+      "background: var(--gl-background-color-subtle, var(--input-bg, transparent))",
+      "opacity: 0.85"
     ].join(";");
     return input;
   }
@@ -267,9 +274,15 @@
     btn.dataset.btnLabel = def.label;
     btn.style.display = "none";
 
-    var tooltipLines = [EXT_NAME];
-    tooltipLines.push(def.transitionName ? "Transition: " + def.transitionName : "No status transition");
-    if (_worklogEnabled) tooltipLines.push("Worklog: " + def.worklogComment);
+    var tooltipLines = [];
+    if (def.transitionName) {
+      tooltipLines.push("Move linked Jira issues to \"" + def.label + "\" status");
+    } else {
+      tooltipLines.push("Log time without changing Jira issue status");
+    }
+    if (_worklogEnabled) {
+      tooltipLines.push("Log worklog: \"" + def.worklogComment + "\"");
+    }
     btn.title = tooltipLines.join("\n");
 
     var textSpan = document.createElement("span");
@@ -281,17 +294,26 @@
     return btn;
   }
 
+  function setAllButtonsDisabled(disabled) {
+    var container = document.getElementById(CONTAINER_ID);
+    if (!container) return;
+    var btns = container.querySelectorAll("button[data-btn-label]");
+    for (var i = 0; i < btns.length; i++) {
+      btns[i].disabled = disabled;
+      btns[i].style.opacity = disabled ? "0.6" : "1";
+      btns[i].style.cursor = disabled ? "default" : "pointer";
+    }
+  }
+
   function handleButtonClick(btn, def) {
-    btn.disabled = true;
-    btn.style.opacity = "0.6";
-    btn.style.cursor = "default";
+    setAllButtonsDisabled(true);
 
     var text = getMRTitleText() + "\n" + getMRDescriptionText();
     var issueKeys = extractJiraKeys(text);
 
     if (issueKeys.length === 0) {
       showToast("No Jira issue keys found in MR description / title.", true);
-      resetButton(btn, def.label);
+      setAllButtonsDisabled(false);
       return;
     }
 
@@ -315,12 +337,12 @@
       function (response) {
         if (chrome.runtime.lastError) {
           showToast("Extension error: " + chrome.runtime.lastError.message, true);
-          resetButton(btn, def.label);
+          setAllButtonsDisabled(false);
           return;
         }
         if (!response) {
           showToast("No response from background.", true);
-          resetButton(btn, def.label);
+          setAllButtonsDisabled(false);
           return;
         }
 
@@ -338,14 +360,6 @@
         }
       }
     );
-  }
-
-  function resetButton(btn, label) {
-    btn.disabled = false;
-    var span = btn.querySelector(".gl-button-text");
-    if (span) span.textContent = label;
-    btn.style.opacity = "1";
-    btn.style.cursor = "pointer";
   }
 
   // --- Toast ---
