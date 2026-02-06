@@ -65,3 +65,22 @@ button:hover {
   font-size: 13px;
   min-height: 20px;
 }
+
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.checkbox-row input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+  cursor: pointer;
+}
+
+.checkbox-row label {
+  margin: 0;
+  cursor: pointer;
+  user-select: none;
+}

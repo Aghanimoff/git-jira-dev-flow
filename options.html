@@ -2,12 +2,12 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Jira Bugfix Mover — Options</title>
+  <title>GitLab MR → Jira Status Mover — Options</title>
   <link rel="stylesheet" href="options.css" />
 </head>
 <body>
   <div class="container">
-    <h1>Jira Bugfix Mover — Settings</h1>
+    <h1>Jira Status Mover — Settings</h1>
 
     <label for="jiraBaseUrl">Jira Base URL</label>
     <input id="jiraBaseUrl" type="url" placeholder="https://jira.example.com" />
@@ -17,6 +17,11 @@
 
     <label for="password">Password / API Token</label>
     <input id="password" type="password" placeholder="password or token" />
+
+    <div class="checkbox-row">
+      <input id="worklogEnabled" type="checkbox" />
+      <label for="worklogEnabled">Jira worklog tracking</label>
+    </div>
 
     <button id="save">Save</button>
     <div id="status"></div>

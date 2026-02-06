@@ -5,6 +5,15 @@
 
   var CONTAINER_ID = "jira-status-mover-container";
   var MR_PATH_RE = /\/merge_requests\/\d+/;
+  var EXT_NAME = "GitLab MR → Jira Status Mover";
+
+  // Loaded once from chrome.storage
+  var _worklogEnabled = false;
+
+  // Load worklog setting once at startup
+  chrome.storage.local.get(["worklogEnabled"], function (data) {
+    _worklogEnabled = !!data.worklogEnabled;
+  });
 
   // ---- Inject CSS animation keyframes once ----
   (function injectStyles() {
@@ -94,10 +103,11 @@
   var _visibilityTimer = null;
   var _visibilityRetries = 0;
   var MAX_VISIBILITY_RETRIES = 20; // 20 × 500ms = 10 seconds of retries
-  var _lastDetectedStatus = null;
-  var _lastDetectedBranch = null;
+  var _visibilityResolved = false;
 
   function updateButtonVisibility() {
+    if (_visibilityResolved) return;
+
     var container = document.getElementById(CONTAINER_ID);
     if (!container) return;
 
@@ -112,14 +122,14 @@
         _visibilityTimer = setTimeout(updateButtonVisibility, 500);
       } else {
         // Fallback after timeout: show all buttons
+        _visibilityResolved = true;
         applyVisibility(container, null, null);
       }
       return;
     }
 
-    // State detected — cache it and apply
-    _lastDetectedStatus = status;
-    _lastDetectedBranch = targetBranch;
+    // State detected — mark resolved and apply
+    _visibilityResolved = true;
     _visibilityRetries = 0;
     clearTimeout(_visibilityTimer);
 
@@ -157,8 +167,7 @@
 
   function resetVisibilityRetries() {
     _visibilityRetries = 0;
-    _lastDetectedStatus = null;
-    _lastDetectedBranch = null;
+    _visibilityResolved = false;
     clearTimeout(_visibilityTimer);
   }
 
@@ -249,26 +258,28 @@
     jiraLabel.style.color = "#333";
     container.appendChild(jiraLabel);
 
-    // Minutes input field
-    var minutesInput = document.createElement("input");
-    minutesInput.id = "jira-worklog-minutes";
-    minutesInput.type = "number";
-    minutesInput.min = "0";
-    minutesInput.step = "5";
-    minutesInput.value = "5";
-    minutesInput.title = "Minutes to log (distributed across issues)";
-    minutesInput.style.cssText = [
-      "width: 48px",
-      "height: 24px",
-      "padding: 2px 4px",
-      "font-size: 12px",
-      "text-align: center",
-      "border: 1px solid #ccc",
-      "border-radius: 4px",
-      "color: #333",
-      "background: #fff"
-    ].join(";");
-    container.appendChild(minutesInput);
+    // Minutes input field (only if worklog is enabled)
+    if (_worklogEnabled) {
+      var minutesInput = document.createElement("input");
+      minutesInput.id = "jira-worklog-minutes";
+      minutesInput.type = "number";
+      minutesInput.min = "0";
+      minutesInput.step = "5";
+      minutesInput.value = "5";
+      minutesInput.title = "Minutes to log (distributed across issues)";
+      minutesInput.style.cssText = [
+        "width: 48px",
+        "height: 24px",
+        "padding: 2px 4px",
+        "font-size: 12px",
+        "text-align: center",
+        "border: 1px solid #ccc",
+        "border-radius: 4px",
+        "color: #333",
+        "background: #fff"
+      ].join(";");
+      container.appendChild(minutesInput);
+    }
 
     BUTTONS.forEach(function (def) {
       var btn = createSingleButton(def);
@@ -290,6 +301,18 @@
     btn.dataset.btnLabel = def.label;
     btn.style.display = "none"; // hidden until visibility is determined
 
+    // Tooltip
+    var tooltipLines = [EXT_NAME];
+    if (def.transitionName) {
+      tooltipLines.push("Transition: " + def.transitionName);
+    } else {
+      tooltipLines.push("No status transition");
+    }
+    if (_worklogEnabled) {
+      tooltipLines.push("Worklog: " + def.worklogComment);
+    }
+    btn.title = tooltipLines.join("\n");
+
     var textSpan = document.createElement("span");
     textSpan.className = "gl-button-text";
     textSpan.textContent = def.label;
@@ -310,13 +333,16 @@
       }
 
       // Read minutes from input and build worklog allocations
-      var minutesInput = document.getElementById("jira-worklog-minutes");
-      var totalMinutes = parseInt(minutesInput ? minutesInput.value : "5", 10) || 0;
-      var allocations = distributeMinutes(totalMinutes, issueKeys.length);
+      var worklogs = [];
+      if (_worklogEnabled) {
+        var minutesInput = document.getElementById("jira-worklog-minutes");
+        var totalMinutes = parseInt(minutesInput ? minutesInput.value : "5", 10) || 0;
+        var allocations = distributeMinutes(totalMinutes, issueKeys.length);
 
-      var worklogs = issueKeys.map(function (key, idx) {
-        return { issueKey: key, minutes: allocations[idx], comment: def.worklogComment };
-      });
+        worklogs = issueKeys.map(function (key, idx) {
+          return { issueKey: key, minutes: allocations[idx], comment: def.worklogComment };
+        });
+      }
 
       chrome.runtime.sendMessage(
         {
@@ -488,18 +514,18 @@
     }
   }
 
-  var _visDebounce = null;
-
   var observer = new MutationObserver(function () {
     onUrlChange();
-    // Also try inject if we are on MR page but buttons are missing (DOM re-render)
-    if (isMRPage() && !document.getElementById(CONTAINER_ID)) {
+    if (!isMRPage()) return;
+
+    // Try inject if buttons are missing (DOM re-render)
+    if (!document.getElementById(CONTAINER_ID)) {
       injectButtons();
     }
-    // Re-check visibility (debounced) in case MR state DOM appeared
-    if (isMRPage() && document.getElementById(CONTAINER_ID)) {
-      clearTimeout(_visDebounce);
-      _visDebounce = setTimeout(updateButtonVisibility, 300);
+    // Re-check visibility only while not yet resolved (DOM still loading)
+    else if (!_visibilityResolved) {
+      // Retry is already managed by setTimeout in updateButtonVisibility,
+      // no need to trigger extra calls from observer
     }
   });
 

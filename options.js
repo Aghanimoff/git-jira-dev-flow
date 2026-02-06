@@ -6,11 +6,12 @@
   var jiraBaseUrlInput = document.getElementById("jiraBaseUrl");
   var usernameInput = document.getElementById("username");
   var passwordInput = document.getElementById("password");
+  var worklogCheckbox = document.getElementById("worklogEnabled");
   var saveBtn = document.getElementById("save");
   var statusEl = document.getElementById("status");
 
   // Load saved values
-  chrome.storage.local.get(["jiraBaseUrl", "username", "password"], function (data) {
+  chrome.storage.local.get(["jiraBaseUrl", "username", "password", "worklogEnabled"], function (data) {
     if (data.jiraBaseUrl) {
       jiraBaseUrlInput.value = data.jiraBaseUrl;
     }
@@ -20,6 +21,7 @@
     if (data.password) {
       passwordInput.value = data.password;
     }
+    worklogCheckbox.checked = !!data.worklogEnabled;
   });
 
   saveBtn.addEventListener("click", function () {
@@ -37,7 +39,8 @@
       {
         "jiraBaseUrl": jiraBaseUrl,
         "username": username,
-        "password": password
+        "password": password,
+        "worklogEnabled": worklogCheckbox.checked
       },
       function () {
         statusEl.textContent = "Settings saved!";
