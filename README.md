@@ -28,6 +28,9 @@ Chrome extension that streamlines developer workflow between GitLab and Jira.
 
 > TODO: add configurable rules in settings
 
+## More information in tooltips
+![Tooltip with issue details](docs/screenshot-tooltip.png)
+
 ## Privacy
 
 This extension:
