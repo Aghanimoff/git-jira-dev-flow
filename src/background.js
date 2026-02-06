@@ -54,35 +54,72 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
     var baseUrl = cfg.jiraBaseUrl.replace(/\/+$/, "");
     var authHeader = "Basic " + btoa(cfg.username + ":" + cfg.password);
     var results = { success: 0, failed: 0, errors: [] };
-    var ops = [];
 
+    // --- Transition ops (parallel) ---
+    var transitionOps = [];
     if (transitionName) {
       issueKeys.forEach(function (key) {
-        ops.push(function (done) {
+        transitionOps.push(function (done) {
           transitionIssue(baseUrl, authHeader, key, transitionName, results, done);
         });
       });
     }
 
-    worklogs.forEach(function (wl) {
-      if (wl.minutes > 0) {
-        ops.push(function (done) {
-          logWorklog(baseUrl, authHeader, wl.issueKey, wl.minutes, wl.comment, results, done);
-        });
-      }
-    });
+    // --- Worklog entries (sequential, with overlap detection) ---
+    var worklogEntries = worklogs.filter(function (wl) { return wl.minutes > 0; });
 
-    if (ops.length === 0) {
+    if (transitionOps.length === 0 && worklogEntries.length === 0) {
       sendResponse({ success: 0, failed: 0, errors: ["Nothing to do."] });
       return;
     }
 
-    var pending = ops.length;
-    ops.forEach(function (op) {
-      op(function () {
-        if (--pending <= 0) sendResponse(results);
+    var transitionsDone = transitionOps.length === 0;
+    var worklogsDone = worklogEntries.length === 0;
+
+    function checkAllDone() {
+      if (transitionsDone && worklogsDone) sendResponse(results);
+    }
+
+    // Launch transitions in parallel
+    if (transitionOps.length > 0) {
+      var pending = transitionOps.length;
+      transitionOps.forEach(function (op) {
+        op(function () {
+          if (--pending <= 0) {
+            transitionsDone = true;
+            checkAllDone();
+          }
+        });
       });
-    });
+    }
+
+    // Process worklogs: fetch existing, then create sequentially in free slots
+    if (worklogEntries.length > 0) {
+      fetchUserWorklogsForToday(baseUrl, authHeader, function (err, busyIntervals) {
+        if (err) busyIntervals = []; // proceed without overlap check on error
+
+        var roundedNow = roundUpTo5Minutes(new Date());
+        var idx = 0;
+
+        function nextWorklog() {
+          if (idx >= worklogEntries.length) {
+            worklogsDone = true;
+            checkAllDone();
+            return;
+          }
+          var wl = worklogEntries[idx++];
+          var durationMs = wl.minutes * 60 * 1000;
+          var startDate = findFreeSlot(busyIntervals, roundedNow.getTime(), durationMs);
+
+          // Register this slot so subsequent worklogs won't overlap with it
+          busyIntervals.push({ start: startDate.getTime(), end: startDate.getTime() + durationMs });
+
+          logWorklog(baseUrl, authHeader, wl.issueKey, wl.minutes, wl.comment, startDate, results, nextWorklog);
+        }
+
+        nextWorklog();
+      });
+    }
   });
 
   return true;
@@ -91,124 +128,123 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
 function checkIssueStatuses(baseUrl, authHeader, issueKeys, targetStatus, sendResponse) {
   var results = { allInTargetStatus: true, statuses: [], errors: [] };
   var pending = issueKeys.length;
-  
-  if (pending === 0) {
-    sendResponse(results);
-    return;
-  }
+  if (pending === 0) { sendResponse(results); return; }
 
-  issueKeys.forEach(function (issueKey) {
-    var url = baseUrl + "/rest/api/2/issue/" + issueKey + "?fields=status";
-    
-    fetch(url, {
-      method: "GET",
-      headers: { "Authorization": authHeader, "Content-Type": "application/json" }
-    })
-      .then(function (resp) {
-        if (!resp.ok) throw new Error("GET status for " + issueKey + " failed: HTTP " + resp.status);
-        return resp.json();
-      })
+  issueKeys.forEach(function (key) {
+    jiraFetch(baseUrl, authHeader, "/rest/api/2/issue/" + key + "?fields=status")
       .then(function (data) {
-        var currentStatus = (data.fields && data.fields.status && data.fields.status.name) || "Unknown";
-        var isInTargetStatus = currentStatus.toLowerCase() === targetStatus.toLowerCase();
-        
-        results.statuses.push({
-          issueKey: issueKey,
-          currentStatus: currentStatus,
-          isInTargetStatus: isInTargetStatus
-        });
-        
-        if (!isInTargetStatus) {
-          results.allInTargetStatus = false;
-        }
-        
-        if (--pending <= 0) {
-          sendResponse(results);
-        }
+        var cur = (data.fields && data.fields.status && data.fields.status.name) || "Unknown";
+        var match = cur.toLowerCase() === targetStatus.toLowerCase();
+        results.statuses.push({ issueKey: key, currentStatus: cur, isInTargetStatus: match });
+        if (!match) results.allInTargetStatus = false;
+        if (--pending <= 0) sendResponse(results);
       })
       .catch(function (err) {
         results.errors.push(err.message || String(err));
         results.allInTargetStatus = false;
-        
-        if (--pending <= 0) {
-          sendResponse(results);
-        }
+        if (--pending <= 0) sendResponse(results);
       });
   });
 }
 
 function transitionIssue(baseUrl, authHeader, issueKey, transitionName, results, done) {
-  var url = baseUrl + "/rest/api/2/issue/" + issueKey + "/transitions";
+  var path = "/rest/api/2/issue/" + issueKey + "/transitions";
   var targetLower = transitionName.toLowerCase();
 
-  fetch(url, {
-    method: "GET",
-    headers: { "Authorization": authHeader, "Content-Type": "application/json" }
-  })
-    .then(function (resp) {
-      if (!resp.ok) throw new Error("GET transitions for " + issueKey + " failed: HTTP " + resp.status);
-      return resp.json();
-    })
+  jiraFetch(baseUrl, authHeader, path)
     .then(function (data) {
       var transitions = data.transitions || [];
-      var target = null;
-      for (var i = 0; i < transitions.length; i++) {
-        if (transitions[i].name && transitions[i].name.toLowerCase() === targetLower) {
-          target = transitions[i];
-          break;
-        }
-      }
+      var target = transitions.find(function (t) { return t.name && t.name.toLowerCase() === targetLower; });
       if (!target) {
-        var available = transitions.map(function (t) { return t.name; }).join(", ");
-        throw new Error(issueKey + ': transition "' + transitionName + '" not found. Available: ' + available);
+        throw new Error(issueKey + ': transition "' + transitionName + '" not found. Available: ' +
+          transitions.map(function (t) { return t.name; }).join(", "));
       }
-      return fetch(url, {
-        method: "POST",
-        headers: { "Authorization": authHeader, "Content-Type": "application/json" },
-        body: JSON.stringify({ transition: { id: target.id } })
-      });
+      return jiraFetch(baseUrl, authHeader, path, "POST", { transition: { id: target.id } });
     })
-    .then(function (resp) {
-      if (!resp.ok) throw new Error(issueKey + ": POST transition failed: HTTP " + resp.status);
-      results.success++;
-      done();
-    })
-    .catch(function (err) {
-      results.failed++;
-      results.errors.push(err.message || String(err));
-      done();
-    });
+    .then(function () { results.success++; done(); })
+    .catch(function (err) { results.failed++; results.errors.push(err.message || String(err)); done(); });
 }
 
-function logWorklog(baseUrl, authHeader, issueKey, minutes, comment, results, done) {
-  var url = baseUrl + "/rest/api/2/issue/" + issueKey + "/worklog";
-  var now = new Date();
-  var pad = function (n) { return String(n).padStart(2, "0"); };
+// --- Helpers ---
 
-  var tz = now.getTimezoneOffset();
-  var tzSign = tz <= 0 ? "+" : "-";
-  var tzAbs = Math.abs(tz);
-  var started = now.getFullYear() + "-" + pad(now.getMonth() + 1) + "-" + pad(now.getDate()) +
-    "T" + pad(now.getHours()) + ":" + pad(now.getMinutes()) + ":" + pad(now.getSeconds()) +
-    ".000" + tzSign + pad(Math.floor(tzAbs / 60)) + pad(tzAbs % 60);
+function jiraFetch(baseUrl, authHeader, path, method, body) {
+  var opts = { method: method || "GET", headers: { "Authorization": authHeader, "Content-Type": "application/json" } };
+  if (body) opts.body = JSON.stringify(body);
+  return fetch(baseUrl + path, opts).then(function (r) {
+    if (!r.ok) throw new Error(path + " failed: HTTP " + r.status);
+    var ct = r.headers.get("content-type") || "";
+    return ct.indexOf("json") !== -1 ? r.json() : r.text();
+  });
+}
 
-  fetch(url, {
-    method: "POST",
-    headers: { "Authorization": authHeader, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      timeSpentSeconds: minutes * 60,
-      started: started,
-      comment: comment
+var FIVE_MIN_MS = 5 * 60 * 1000;
+
+// Round up to nearest 5-min boundary (e.g. 1:02:45 → 1:05:00)
+function roundUpTo5Minutes(date) {
+  var ms = date.getTime(), rem = ms % FIVE_MIN_MS;
+  return new Date(rem === 0 ? ms : ms + FIVE_MIN_MS - rem);
+}
+
+function formatJiraDateTime(date) {
+  var p = function (n) { return String(n).padStart(2, "0"); };
+  var tz = date.getTimezoneOffset(), sign = tz <= 0 ? "+" : "-", abs = Math.abs(tz);
+  return date.getFullYear() + "-" + p(date.getMonth() + 1) + "-" + p(date.getDate()) +
+    "T" + p(date.getHours()) + ":" + p(date.getMinutes()) + ":" + p(date.getSeconds()) +
+    ".000" + sign + p(Math.floor(abs / 60)) + p(abs % 60);
+}
+
+// Fetch today's worklog intervals for the current user → callback(err, [{start,end}])
+function fetchUserWorklogsForToday(baseUrl, authHeader, callback) {
+  var hdr = { "Authorization": authHeader, "Content-Type": "application/json" };
+  jiraFetch(baseUrl, authHeader, "/rest/api/2/myself")
+    .then(function (user) {
+      var uid = user.name || user.key || user.accountId || "";
+      var jql = encodeURIComponent("worklogAuthor = currentUser() AND worklogDate >= startOfDay()");
+      return jiraFetch(baseUrl, authHeader, "/rest/api/2/search?jql=" + jql + "&fields=key&maxResults=100")
+        .then(function (data) { return { uid: uid, keys: (data.issues || []).map(function (i) { return i.key; }) }; });
     })
-  })
-    .then(function (resp) {
-      if (!resp.ok) throw new Error(issueKey + ": worklog POST failed: HTTP " + resp.status);
-      results.success++;
-      done();
+    .then(function (r) {
+      if (r.keys.length === 0) return callback(null, []);
+      var intervals = [], pending = r.keys.length;
+      r.keys.forEach(function (key) {
+        jiraFetch(baseUrl, authHeader, "/rest/api/2/issue/" + key + "/worklog")
+          .then(function (data) {
+            (data.worklogs || []).forEach(function (wl) {
+              var a = wl.author;
+              if (a && (a.name === r.uid || a.key === r.uid || a.accountId === r.uid)) {
+                var s = new Date(wl.started).getTime();
+                intervals.push({ start: s, end: s + (wl.timeSpentSeconds || 0) * 1000 });
+              }
+            });
+            if (--pending <= 0) callback(null, intervals);
+          })
+          .catch(function () { if (--pending <= 0) callback(null, intervals); });
+      });
     })
-    .catch(function (err) {
-      results.failed++;
-      results.errors.push(err.message || String(err));
-      done();
-    });
+    .catch(function (err) { callback(err, []); });
+}
+
+// Find earliest 5-min-aligned free slot starting at or after proposedStartMs
+function findFreeSlot(busyIntervals, proposedStartMs, durationMs) {
+  var s = proposedStartMs;
+  busyIntervals.sort(function (a, b) { return a.start - b.start; });
+  for (var attempt = 0; attempt < 288; attempt++) {
+    var e = s + durationMs, hit = false;
+    for (var i = 0; i < busyIntervals.length; i++) {
+      if (s < busyIntervals[i].end && e > busyIntervals[i].start) {
+        var nxt = busyIntervals[i].end, rem = nxt % FIVE_MIN_MS;
+        s = rem === 0 ? nxt : nxt + FIVE_MIN_MS - rem;
+        hit = true; break;
+      }
+    }
+    if (!hit) return new Date(s);
+  }
+  return new Date(proposedStartMs);
+}
+
+function logWorklog(baseUrl, authHeader, issueKey, minutes, comment, startDate, results, done) {
+  jiraFetch(baseUrl, authHeader, "/rest/api/2/issue/" + issueKey + "/worklog", "POST",
+    { timeSpentSeconds: minutes * 60, started: formatJiraDateTime(startDate), comment: comment })
+    .then(function () { results.success++; done(); })
+    .catch(function (err) { results.failed++; results.errors.push(err.message || String(err)); done(); });
 }
