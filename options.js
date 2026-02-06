@@ -1,4 +1,4 @@
-// options.js — Save / load Jira credentials
+// options.js — Git&Jira deroutine Dev Flow
 
 (function () {
   "use strict";
@@ -11,17 +11,10 @@
   var saveBtn = document.getElementById("save");
   var statusEl = document.getElementById("status");
 
-  // Load saved values
   chrome.storage.local.get(["jiraBaseUrl", "username", "password", "worklogEnabled", "autoOpenJira"], function (data) {
-    if (data.jiraBaseUrl) {
-      jiraBaseUrlInput.value = data.jiraBaseUrl;
-    }
-    if (data.username) {
-      usernameInput.value = data.username;
-    }
-    if (data.password) {
-      passwordInput.value = data.password;
-    }
+    if (data.jiraBaseUrl) jiraBaseUrlInput.value = data.jiraBaseUrl;
+    if (data.username) usernameInput.value = data.username;
+    if (data.password) passwordInput.value = data.password;
     worklogCheckbox.checked = !!data.worklogEnabled;
     autoOpenCheckbox.checked = !!data.autoOpenJira;
   });
@@ -37,21 +30,16 @@
       return;
     }
 
-    chrome.storage.local.set(
-      {
-        "jiraBaseUrl": jiraBaseUrl,
-        "username": username,
-        "password": password,
-        "worklogEnabled": worklogCheckbox.checked,
-        "autoOpenJira": autoOpenCheckbox.checked
-      },
-      function () {
-        statusEl.textContent = "Settings saved!";
-        statusEl.style.color = "#2da160";
-        setTimeout(function () {
-          statusEl.textContent = "";
-        }, 2500);
-      }
-    );
+    chrome.storage.local.set({
+      jiraBaseUrl: jiraBaseUrl,
+      username: username,
+      password: password,
+      worklogEnabled: worklogCheckbox.checked,
+      autoOpenJira: autoOpenCheckbox.checked
+    }, function () {
+      statusEl.textContent = "Settings saved!";
+      statusEl.style.color = "#2da160";
+      setTimeout(function () { statusEl.textContent = ""; }, 2500);
+    });
   });
 })();
