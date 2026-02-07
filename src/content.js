@@ -36,7 +36,12 @@
         targetStatus: targetStatus,
         color: b.color || "rgb(99, 166, 233)",
         worklogComment: b.worklogComment || "",
-        visibility: { status: (b.mrStatus || "open").toLowerCase(), branches: branches }
+        visibility: { status: (b.mrStatus || "open").toLowerCase(), branches: branches },
+        autoTrigger: {
+          approve: !!b.autoOnApprove,
+          merge: !!b.autoOnMerge,
+          submitReview: !!b.autoOnSubmitReview
+        }
       };
     });
   }
@@ -69,11 +74,12 @@
     if (document.querySelector(".status-box-mr-merged, .status-box.status-box-merged")) return "merged";
     if (document.querySelector(".status-box-open, .status-box.status-box-open")) return "open";
     if (document.querySelector(".status-box-closed, .status-box.status-box-closed")) return "closed";
+    if (document.querySelector(".status-box-canceled, .status-box.status-box-canceled, .status-box-mr-canceled")) return "canceled";
 
     var badges = document.querySelectorAll(".badge");
     for (var i = 0; i < badges.length; i++) {
       var t = (badges[i].textContent || "").trim().toLowerCase();
-      if (t === "merged" || t === "open" || t === "closed") return t;
+      if (t === "merged" || t === "open" || t === "closed" || t === "canceled") return t;
     }
 
     return null;
@@ -102,13 +108,14 @@
   // --- Button visibility ---
 
   var _visibilityTimer = null;
+  var _visibilityRefreshTimer = null;
   var _visibilityRetries = 0;
   var MAX_VISIBILITY_RETRIES = 20;
   var _visibilityResolved = false;
+  var _lastVisibleStatus = null;
+  var _lastVisibleTargetBranch = null;
 
-  function updateButtonVisibility() {
-    if (_visibilityResolved) return;
-
+  function updateButtonVisibility(force) {
     var container = document.getElementById(CONTAINER_ID);
     if (!container) return;
 
@@ -116,11 +123,11 @@
     var targetBranch = detectTargetBranch();
 
     if (!status || !targetBranch) {
-      if (_visibilityRetries < MAX_VISIBILITY_RETRIES) {
+      if (!_visibilityResolved && _visibilityRetries < MAX_VISIBILITY_RETRIES) {
         _visibilityRetries++;
         clearTimeout(_visibilityTimer);
         _visibilityTimer = setTimeout(updateButtonVisibility, 500);
-      } else {
+      } else if (!_visibilityResolved) {
         // Fallback: show all buttons after timeout
         _visibilityResolved = true;
         applyVisibility(container, null, null);
@@ -134,6 +141,16 @@
     _visibilityResolved = true;
     _visibilityRetries = 0;
     clearTimeout(_visibilityTimer);
+
+    var changed = force ||
+      !_lastVisibleStatus ||
+      !_lastVisibleTargetBranch ||
+      _lastVisibleStatus !== status ||
+      _lastVisibleTargetBranch !== targetBranch;
+    if (!changed) return;
+
+    _lastVisibleStatus = status;
+    _lastVisibleTargetBranch = targetBranch;
     applyVisibility(container, status, targetBranch);
     
     // Update warning indicators after visibility is resolved
@@ -169,7 +186,17 @@
   function resetVisibilityState() {
     _visibilityRetries = 0;
     _visibilityResolved = false;
+    _lastVisibleStatus = null;
+    _lastVisibleTargetBranch = null;
     clearTimeout(_visibilityTimer);
+    clearTimeout(_visibilityRefreshTimer);
+  }
+
+  function scheduleVisibilityRefresh() {
+    clearTimeout(_visibilityRefreshTimer);
+    _visibilityRefreshTimer = setTimeout(function () {
+      updateButtonVisibility(false);
+    }, 120);
   }
 
   // --- Time distribution ---
@@ -586,6 +613,60 @@
     }
   }
 
+  // --- Auto trigger actions ---
+
+  var AUTO_TRIGGER_COOLDOWN_MS = 1200;
+  var _lastAutoTriggerTs = { approve: 0, merge: 0, submitReview: 0 };
+
+  function detectGitLabAction(target) {
+    if (!target || !target.closest) return null;
+
+    var control = target.closest("button, [role='button'], input[type='submit']");
+    if (!control) return null;
+    if (control.closest("#" + CONTAINER_ID)) return null;
+
+    if (control.matches("[data-testid='approve-button'], [data-qa-selector='approve_button']")) return "approve";
+    if (control.matches("[data-testid='merge-button'], [data-qa-selector='merge_button']")) return "merge";
+    if (control.matches("[data-testid='submit-review-button'], [data-qa-selector='submit_review_button']")) return "submitReview";
+
+    var text = (control.textContent || control.value || "").trim().toLowerCase();
+    if (text === "approve") return "approve";
+    if (text.indexOf("submit review") !== -1) return "submitReview";
+    if (text === "merge" || text.indexOf("merge ") === 0 || text.indexOf("merge immediately") !== -1) return "merge";
+
+    return null;
+  }
+
+  function triggerAutoButtons(action) {
+    var now = Date.now();
+    if (now - (_lastAutoTriggerTs[action] || 0) < AUTO_TRIGGER_COOLDOWN_MS) return;
+    _lastAutoTriggerTs[action] = now;
+
+    var matched = BUTTONS.filter(function (def) {
+      return def.autoTrigger && def.autoTrigger[action];
+    });
+    if (!matched.length) return;
+
+    for (var i = 0; i < matched.length; i++) {
+      (function (def, idx) {
+        setTimeout(function () {
+          handleButtonClick(null, def);
+        }, idx * 250);
+      })(matched[i], i);
+    }
+  }
+
+  function onGitLabActionClick(e) {
+    if (!isMRPage()) return;
+    var action = detectGitLabAction(e.target);
+    if (!action) return;
+
+    setTimeout(function () {
+      if (!isMRPage()) return;
+      triggerAutoButtons(action);
+    }, 250);
+  }
+
   // --- Injection (SPA-aware) ---
 
   function isMRPage() {
@@ -599,7 +680,7 @@
     var target = findInjectionTarget();
     if (target) {
       target.appendChild(createButtonContainer());
-      updateButtonVisibility();
+      updateButtonVisibility(true);
     }
   }
 
@@ -635,6 +716,8 @@
   var lastUrl = window.location.href;
 
   function startObserver() {
+    document.addEventListener("click", onGitLabActionClick, true);
+
     var observer = new MutationObserver(function () {
       if (window.location.href !== lastUrl) {
         lastUrl = window.location.href;
@@ -642,8 +725,12 @@
         resetVisibilityState();
         setTimeout(injectButtons, 800);
       }
-      if (isMRPage() && !document.getElementById(CONTAINER_ID)) {
-        injectButtons();
+      if (isMRPage()) {
+        if (!document.getElementById(CONTAINER_ID)) {
+          injectButtons();
+        } else {
+          scheduleVisibilityRefresh();
+        }
       }
     });
 

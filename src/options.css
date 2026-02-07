@@ -232,7 +232,7 @@ button:hover {
 
 .buttons-table {
   width: 100%;
-  min-width: 760px;
+  min-width: 1020px;
   border-collapse: collapse;
   background: var(--surface-soft);
 }
@@ -270,6 +270,14 @@ button:hover {
   width: 34px;
   min-width: 34px;
   padding: 2px;
+}
+
+.buttons-table input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  margin: 0 auto;
+  display: block;
 }
 
 .buttons-table td:last-child {
@@ -312,4 +320,3 @@ button:hover {
     flex-wrap: wrap;
   }
 }
-

@@ -86,6 +86,14 @@
     return input;
   }
 
+  function createCheckbox(className, checked) {
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.className = className;
+    input.checked = !!checked;
+    return input;
+  }
+
   function createStatusSelect(value) {
     const select = document.createElement("select");
     select.className = "bf-status";
@@ -123,6 +131,9 @@
     const worklogInput = createInput("bf-comment", button.worklogComment, "Worklog");
     const statusSelect = createStatusSelect(button.mrStatus);
     const branchesInput = createInput("bf-branches", button.branches, "Branches");
+    const autoApproveInput = createCheckbox("bf-auto-approve", button.autoOnApprove);
+    const autoMergeInput = createCheckbox("bf-auto-merge", button.autoOnMerge);
+    const autoReviewInput = createCheckbox("bf-auto-review", button.autoOnSubmitReview);
 
     tr.appendChild(createCell(labelInput));
     tr.appendChild(createCell(transitionInput));
@@ -130,6 +141,9 @@
     tr.appendChild(createCell(worklogInput));
     tr.appendChild(createCell(statusSelect));
     tr.appendChild(createCell(branchesInput));
+    tr.appendChild(createCell(autoApproveInput));
+    tr.appendChild(createCell(autoMergeInput));
+    tr.appendChild(createCell(autoReviewInput));
 
     const removeCell = document.createElement("td");
     removeCell.appendChild(createRemoveButton(() => {
@@ -164,7 +178,10 @@
         color: hexToRgb(row.querySelector(".bf-color").value),
         worklogComment: row.querySelector(".bf-comment").value.trim(),
         mrStatus: row.querySelector(".bf-status").value,
-        branches: row.querySelector(".bf-branches").value.trim()
+        branches: row.querySelector(".bf-branches").value.trim(),
+        autoOnApprove: row.querySelector(".bf-auto-approve").checked,
+        autoOnMerge: row.querySelector(".bf-auto-merge").checked,
+        autoOnSubmitReview: row.querySelector(".bf-auto-review").checked
       });
     });
 
