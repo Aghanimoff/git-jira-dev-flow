@@ -4,11 +4,44 @@
   "use strict";
 
   var CONTAINER_ID = "jira-status-mover-container";
+  var CONTAINER_SELECTOR = "#" + CONTAINER_ID;
   var MR_PATH_RE = /\/merge_requests\/\d+/;
-  var EXT_NAME = "Git&Jira deroutine Dev Flow";
+  var STORAGE_KEYS = ["worklogEnabled", "autoOpenJira", "jiraBaseUrl", "buttons"];
+  var STATUS_CHECK_RETRY_MS = 500;
+  var STATUS_CHECK_RETRIES_MAX = 20;
+  var VISIBILITY_REFRESH_DEBOUNCE_MS = 120;
+  var WARNING_INDICATORS_DELAY_MS = 100;
+  var AUTO_TRIGGER_COOLDOWN_MS = 1200;
+  var AUTO_TRIGGER_STEP_DELAY_MS = 250;
+  var MERGE_PENDING_TTL_MS = 120000;
+  var CLICK_ACTION_DELAY_MS = 250;
+  var SPA_NAVIGATION_INJECT_DELAY_MS = 800;
+  var WORKLOG_TOOLTIP = "Time will be logged to each linked Jira issue.\nIf multiple issues found, minutes are distributed evenly (rounded up to 5 min each).";
+  var MR_STATUS_RULES = [
+    { status: "merged", selector: ".status-box-mr-merged, .status-box.status-box-merged" },
+    { status: "open", selector: ".status-box-open, .status-box.status-box-open" },
+    { status: "closed", selector: ".status-box-closed, .status-box.status-box-closed" },
+    { status: "canceled", selector: ".status-box-canceled, .status-box.status-box-canceled, .status-box-mr-canceled" }
+  ];
+  var MR_TITLE_SELECTORS = [
+    ".detail-page-header .title",
+    ".merge-request-details .title",
+    "[data-testid='title-content']",
+    ".page-title"
+  ];
+  var MR_DESCRIPTION_SELECTORS = [
+    ".detail-page-description .md",
+    ".description .md",
+    ".merge-request-details .md"
+  ];
+  var BUTTON_ACTION_SELECTORS = {
+    approve: "[data-testid='approve-button'], [data-qa-selector='approve_button']",
+    merge: "[data-testid='merge-button'], [data-qa-selector='merge_button']",
+    submitReview: "[data-testid='submit-review-button'], [data-qa-selector='submit_review_button']"
+  };
+  var BUTTON_ACTION_KEYS = ["approve", "merge", "submitReview"];
 
-  // Safe wrapper: if the extension was reloaded, chrome.runtime is invalidated
-  // and sendMessage throws synchronously. Catch that and remove stale UI.
+  // Keep UI resilient when extension reload invalidates the runtime port.
   function safeSendMessage(msg, callback) {
     try {
       chrome.runtime.sendMessage(msg, callback);
@@ -22,9 +55,7 @@
   var _autoOpenJira = false;
   var _jiraBaseUrl = "";
   var BUTTONS = [];
-  var _configReady = false;
 
-  // Convert flat storage format → internal format used by the extension
   function parseButtons(arr) {
     return (arr || []).map(function (b) {
       var branches = (b.branches || "").split(",").map(function (s) { return s.trim().toLowerCase(); }).filter(Boolean);
@@ -46,39 +77,49 @@
     });
   }
 
-  // Load config: storage first, then defaults.json as fallback
   function loadConfig(callback) {
-    chrome.storage.local.get(["worklogEnabled", "autoOpenJira", "jiraBaseUrl", "buttons"], function (data) {
+    chrome.storage.local.get(STORAGE_KEYS, function (data) {
       _worklogEnabled = !!data.worklogEnabled;
       _autoOpenJira = !!data.autoOpenJira;
       _jiraBaseUrl = (data.jiraBaseUrl || "").replace(/\/+$/, "");
 
       if (data.buttons && data.buttons.length > 0) {
         BUTTONS = parseButtons(data.buttons);
-        _configReady = true;
         callback();
       } else {
-        // First run or reset — load defaults.json
         fetch(chrome.runtime.getURL("src/defaults.json"))
           .then(function (r) { return r.json(); })
           .then(function (defs) { BUTTONS = parseButtons(defs.buttons); })
           .catch(function () { BUTTONS = []; })
-          .finally(function () { _configReady = true; callback(); });
+          .finally(callback);
       }
     });
   }
 
-  // --- MR state detection ---
+  function getText(el) {
+    return (el && el.textContent ? el.textContent : "").trim();
+  }
+
+  function getLowerText(el) {
+    return getText(el).toLowerCase();
+  }
+
+  function findBySelectors(selectors) {
+    for (var i = 0; i < selectors.length; i++) {
+      var el = document.querySelector(selectors[i]);
+      if (el) return el;
+    }
+    return null;
+  }
 
   function detectMRStatus() {
-    if (document.querySelector(".status-box-mr-merged, .status-box.status-box-merged")) return "merged";
-    if (document.querySelector(".status-box-open, .status-box.status-box-open")) return "open";
-    if (document.querySelector(".status-box-closed, .status-box.status-box-closed")) return "closed";
-    if (document.querySelector(".status-box-canceled, .status-box.status-box-canceled, .status-box-mr-canceled")) return "canceled";
+    for (var i = 0; i < MR_STATUS_RULES.length; i++) {
+      if (document.querySelector(MR_STATUS_RULES[i].selector)) return MR_STATUS_RULES[i].status;
+    }
 
     var badges = document.querySelectorAll(".badge");
-    for (var i = 0; i < badges.length; i++) {
-      var t = (badges[i].textContent || "").trim().toLowerCase();
+    for (var b = 0; b < badges.length; b++) {
+      var t = getLowerText(badges[b]);
       if (t === "merged" || t === "open" || t === "closed" || t === "canceled") return t;
     }
 
@@ -86,31 +127,29 @@
   }
 
   function detectTargetBranch() {
-    var el = document.querySelector(".js-target-branch");
-    if (el) return (el.textContent || "").trim().toLowerCase();
+    var primary = document.querySelector(".js-target-branch");
+    if (primary) return getLowerText(primary);
 
     var refs = document.querySelectorAll(".ref-name");
-    if (refs.length >= 2) return (refs[1].textContent || "").trim().toLowerCase();
+    if (refs.length >= 2) return getLowerText(refs[1]);
 
     var testEl = document.querySelector("[data-testid='target-branch-link']");
-    if (testEl) return (testEl.textContent || "").trim().toLowerCase();
+    if (testEl) return getLowerText(testEl);
 
     // Last /-/tree/ link (excluding "Repository" nav) is typically target branch
     var branchLinks = document.querySelectorAll("a[href*='/-/tree/']");
     for (var b = branchLinks.length - 1; b >= 0; b--) {
-      var text = (branchLinks[b].textContent || "").trim();
-      if (text && text.toLowerCase() !== "repository") return text.toLowerCase();
+      var text = getText(branchLinks[b]);
+      var normalized = text.toLowerCase();
+      if (text && normalized !== "repository") return normalized;
     }
 
     return null;
   }
 
-  // --- Button visibility ---
-
   var _visibilityTimer = null;
   var _visibilityRefreshTimer = null;
   var _visibilityRetries = 0;
-  var MAX_VISIBILITY_RETRIES = 20;
   var _visibilityResolved = false;
   var _lastVisibleStatus = null;
   var _lastVisibleTargetBranch = null;
@@ -123,17 +162,15 @@
     var targetBranch = detectTargetBranch();
 
     if (!status || !targetBranch) {
-      if (!_visibilityResolved && _visibilityRetries < MAX_VISIBILITY_RETRIES) {
+      if (!_visibilityResolved && _visibilityRetries < STATUS_CHECK_RETRIES_MAX) {
         _visibilityRetries++;
         clearTimeout(_visibilityTimer);
-        _visibilityTimer = setTimeout(updateButtonVisibility, 500);
+        _visibilityTimer = setTimeout(updateButtonVisibility, STATUS_CHECK_RETRY_MS);
       } else if (!_visibilityResolved) {
-        // Fallback: show all buttons after timeout
+        // GitLab can render MR metadata late; after retries we keep controls visible.
         _visibilityResolved = true;
         applyVisibility(container, null, null);
-        
-        // Update warning indicators after fallback
-        setTimeout(updateWarningIndicators, 100);
+        setTimeout(updateWarningIndicators, WARNING_INDICATORS_DELAY_MS);
       }
       return;
     }
@@ -143,25 +180,19 @@
     clearTimeout(_visibilityTimer);
 
     var prevStatus = _lastVisibleStatus;
-    var changed = force ||
-      !_lastVisibleStatus ||
-      !_lastVisibleTargetBranch ||
-      _lastVisibleStatus !== status ||
-      _lastVisibleTargetBranch !== targetBranch;
-    if (!changed) return;
+    if (!force && _lastVisibleStatus === status && _lastVisibleTargetBranch === targetBranch) return;
 
     _lastVisibleStatus = status;
     _lastVisibleTargetBranch = targetBranch;
     applyVisibility(container, status, targetBranch);
 
-    // Merge auto-trigger should run only when MR actually becomes merged.
+    // Prevent false merge triggers from confirmation dialogs.
     if (status === "merged" && prevStatus !== "merged" && hasPendingMergeAutoTrigger()) {
       consumePendingMergeAutoTrigger();
       triggerAutoButtons("merge");
     }
-    
-    // Update warning indicators after visibility is resolved
-    setTimeout(updateWarningIndicators, 100);
+
+    setTimeout(updateWarningIndicators, WARNING_INDICATORS_DELAY_MS);
   }
 
   function applyVisibility(container, status, targetBranch) {
@@ -170,17 +201,11 @@
 
     for (var i = 0; i < btns.length; i++) {
       var label = btns[i].dataset.btnLabel;
-      var def = null;
-      for (var j = 0; j < BUTTONS.length; j++) {
-        if (BUTTONS[j].label === label) { def = BUTTONS[j]; break; }
-      }
+      var def = findButtonDefByLabel(label);
       if (!def) continue;
 
-      var show = (!status || !targetBranch)
-        ? true
-        : def.visibility.status === status && def.visibility.branches.indexOf(targetBranch) !== -1;
+      var show = isVisibleForMR(def, status, targetBranch);
 
-      // CodeReview is only useful with worklog enabled
       if (!def.transitionName && !_worklogEnabled) show = false;
 
       btns[i].style.display = show ? "" : "none";
@@ -204,12 +229,10 @@
     clearTimeout(_visibilityRefreshTimer);
     _visibilityRefreshTimer = setTimeout(function () {
       updateButtonVisibility(false);
-    }, 120);
+    }, VISIBILITY_REFRESH_DEBOUNCE_MS);
   }
 
-  // --- Time distribution ---
-
-  // Distribute totalMinutes across count issues, each rounded up to nearest 5 (min 5).
+  // Distribute totalMinutes across issues, each rounded up to nearest 5 (min 5).
   function distributeMinutes(totalMinutes, count) {
     if (count <= 0) return [];
     var allocations = [];
@@ -225,8 +248,6 @@
 
     return allocations;
   }
-
-  // --- Jira key extraction ---
 
   var JIRA_URL_RE = /https?:\/\/[^\s\/]+\/browse\/([A-Z][A-Z0-9_]+-\d+)/gi;
   var JIRA_KEY_RE = /\b([A-Z][A-Z0-9_]+-\d+)\b/g;
@@ -244,50 +265,87 @@
     return Object.keys(keys);
   }
 
-  // --- MR title / description ---
+  function getInnerTextBySelectors(selectors) {
+    var el = findBySelectors(selectors);
+    return el ? (el.innerText || "") : "";
+  }
+
+  function getMRContextText() {
+    return getMRTitleText() + "\n" + getMRDescriptionText();
+  }
+
+  function getTargetStatus(def) {
+    return def.targetStatus || def.transitionName || def.label;
+  }
+
+  function uniqueNonEmpty(values) {
+    var out = [];
+    var seen = {};
+    for (var i = 0; i < values.length; i++) {
+      var value = (values[i] || "").trim();
+      if (!value || seen[value]) continue;
+      seen[value] = true;
+      out.push(value);
+    }
+    return out;
+  }
+
+  function getTargetStatusNames(def) {
+    return uniqueNonEmpty([def.targetStatus, def.transitionName, def.label]);
+  }
+
+  function buildButtonTooltip(def) {
+    var lines = [];
+    if (def.transitionName) {
+      lines.push("Move linked Jira issues to \"" + getTargetStatus(def) + "\" status");
+    } else {
+      lines.push("Log time without changing Jira issue status");
+    }
+    if (_worklogEnabled) lines.push("Log worklog: \"" + def.worklogComment + "\"");
+    return lines.join("\n");
+  }
+
+  function findButtonDefByLabel(label) {
+    for (var i = 0; i < BUTTONS.length; i++) {
+      if (BUTTONS[i].label === label) return BUTTONS[i];
+    }
+    return null;
+  }
+
+  function matchesTargetBranch(def, targetBranch) {
+    return !!(def && def.visibility && def.visibility.branches && def.visibility.branches.indexOf(targetBranch) !== -1);
+  }
+
+  function isVisibleForMR(def, status, targetBranch) {
+    if (!def) return false;
+    if (!status || !targetBranch) return true;
+    return def.visibility.status === status && matchesTargetBranch(def, targetBranch);
+  }
 
   function getMRDescriptionText() {
-    var el = document.querySelector(".detail-page-description .md") ||
-             document.querySelector(".description .md") ||
-             document.querySelector(".merge-request-details .md");
-    return el ? (el.innerText || "") : "";
+    return getInnerTextBySelectors(MR_DESCRIPTION_SELECTORS);
   }
 
   function getMRTitleText() {
-    var el = document.querySelector(".detail-page-header .title") ||
-             document.querySelector(".merge-request-details .title") ||
-             document.querySelector("[data-testid='title-content']") ||
-             document.querySelector(".page-title");
-    return el ? (el.innerText || "") : "";
+    return getInnerTextBySelectors(MR_TITLE_SELECTORS);
   }
-
-  // --- UI creation ---
 
   function createButtonContainer() {
     var container = document.createElement("span");
     container.id = CONTAINER_ID;
-    container.style.display = "none";
-    container.style.gap = "6px";
-    container.style.marginLeft = "auto";
-    container.style.flexWrap = "wrap";
-    container.style.alignItems = "center";
+    container.className = "jira-controls";
 
     var jiraLabel = document.createElement("span");
+    jiraLabel.className = "jira-controls-label";
     jiraLabel.textContent = "Jira:";
-    jiraLabel.style.fontWeight = "600";
-    jiraLabel.style.fontSize = "13px";
-    jiraLabel.style.color = "currentColor";
     container.appendChild(jiraLabel);
 
     if (_worklogEnabled) {
       container.appendChild(createMinutesInput());
       var minLabel = document.createElement("span");
+      minLabel.className = "jira-worklog-label";
       minLabel.textContent = "min to worklog";
-      minLabel.style.fontSize = "12px";
-      minLabel.style.color = "currentColor";
-      minLabel.style.opacity = "0.7";
-      minLabel.title = "Time will be logged to each linked Jira issue.\nIf multiple issues found, minutes are distributed evenly (rounded up to 5 min each).";
-      minLabel.style.cursor = "help";
+      minLabel.title = WORKLOG_TOOLTIP;
       container.appendChild(minLabel);
     }
 
@@ -301,51 +359,24 @@
   function createMinutesInput() {
     var input = document.createElement("input");
     input.id = "jira-worklog-minutes";
+    input.className = "jira-worklog-input";
     input.type = "number";
     input.min = "0";
     input.step = "5";
     input.value = "5";
-    input.title = "Time will be logged to each linked Jira issue.\nIf multiple issues found, minutes are distributed evenly (rounded up to 5 min each).";
-    input.style.cssText = [
-      "width: 48px",
-      "height: 24px",
-      "padding: 2px 4px",
-      "font-size: 12px",
-      "text-align: center",
-      "border: 1px solid currentColor",
-      "border-radius: 4px",
-      "color: inherit",
-      "background: var(--gl-background-color-subtle, var(--input-bg, transparent))",
-      "opacity: 0.85"
-    ].join(";");
+    input.title = WORKLOG_TOOLTIP;
     return input;
   }
 
   function createSingleButton(def) {
     var btn = document.createElement("button");
     btn.type = "button";
-    btn.className = "btn gl-button btn-sm jira-btn-transition";
+    btn.className = "btn gl-button btn-sm jira-btn jira-btn-transition";
     btn.style.backgroundColor = def.color;
-    btn.style.color = "#fff";
-    btn.style.border = "none";
-    btn.style.cursor = "pointer";
-    btn.style.position = "relative";
-    btn.dataset.transitionName = def.transitionName || "";
-    btn.dataset.targetStatus = def.targetStatus || "";
     btn.dataset.btnLabel = def.label;
     btn.style.display = "none";
 
-    var tooltipLines = [];
-    var targetStatusName = def.targetStatus || def.transitionName || def.label;
-    if (def.transitionName) {
-      tooltipLines.push("Move linked Jira issues to \"" + targetStatusName + "\" status");
-    } else {
-      tooltipLines.push("Log time without changing Jira issue status");
-    }
-    if (_worklogEnabled) {
-      tooltipLines.push("Log worklog: \"" + def.worklogComment + "\"");
-    }
-    btn.title = tooltipLines.join("\n");
+    btn.title = buildButtonTooltip(def);
 
     var textSpan = document.createElement("span");
     textSpan.className = "gl-button-text";
@@ -368,28 +399,38 @@
     var btns = container.querySelectorAll("button[data-btn-label]");
     for (var i = 0; i < btns.length; i++) {
       btns[i].disabled = disabled;
-      btns[i].style.opacity = disabled ? "0.6" : "1";
-      btns[i].style.cursor = disabled ? "default" : "pointer";
+      btns[i].classList.toggle("jira-btn--disabled", disabled);
     }
+  }
+
+  function showActionError(message) {
+    showToast(message, true);
+    setAllButtonsDisabled(false);
+  }
+
+  function hasRuntimeOrEmptyResponseError(response) {
+    if (chrome.runtime.lastError) {
+      showActionError("Extension error: " + chrome.runtime.lastError.message);
+      return true;
+    }
+    if (!response) {
+      showActionError("No response from background.");
+      return true;
+    }
+    return false;
   }
 
   function handleButtonClick(btn, def) {
     if (!def.transitionName) {
-      // For CodeReview button (no transition), proceed directly
       executeJiraAction(btn, def);
       return;
     }
 
-    // Check issue statuses first for transition buttons
     setAllButtonsDisabled(true);
     
-    var text = getMRTitleText() + "\n" + getMRDescriptionText();
-    var issueKeys = extractJiraKeys(text);
-    var targetStatusName = def.targetStatus || def.transitionName || def.label;
-    var targetStatusNames = [def.targetStatus, def.transitionName, def.label]
-      .map(function (v) { return (v || "").trim(); })
-      .filter(Boolean)
-      .filter(function (v, idx, a) { return a.indexOf(v) === idx; });
+    var issueKeys = extractJiraKeys(getMRContextText());
+    var targetStatusName = getTargetStatus(def);
+    var targetStatusNames = getTargetStatusNames(def);
 
     if (issueKeys.length === 0) {
       showToast("No Jira issue keys found in MR description / title.", true);
@@ -405,25 +446,12 @@
         targetStatuses: targetStatusNames
       },
       function (response) {
-        if (chrome.runtime.lastError) {
-          showToast("Extension error: " + chrome.runtime.lastError.message, true);
-          setAllButtonsDisabled(false);
-          return;
-        }
-
-        if (!response) {
-          showToast("No response from background.", true);
-          setAllButtonsDisabled(false);
-          return;
-        }
+        if (hasRuntimeOrEmptyResponseError(response)) return;
 
         if (response.errors && response.errors.length > 0) {
-          showToast("Status check failed: " + response.errors.join(", "), true);
-          setAllButtonsDisabled(false);
-          return;
+          return showActionError("Status check failed: " + response.errors.join(", "));
         }
 
-        // Check if all issues are already in target status
         if (response.allInTargetStatus) {
           var alreadyInStatus = response.statuses.map(function (s) { return s.issueKey; }).join(", ");
           showWarningDialog(
@@ -435,7 +463,6 @@
           return;
         }
 
-        // Check if some issues are already in target status
         var alreadyInTarget = response.statuses.filter(function (s) { return s.isInTargetStatus; });
         if (alreadyInTarget.length > 0) {
           var alreadyInKeys = alreadyInTarget.map(function (s) { return s.issueKey; }).join(", ");
@@ -452,7 +479,6 @@
           return;
         }
 
-        // All checks passed, proceed with action
         executeJiraAction(btn, def);
       }
     );
@@ -461,8 +487,7 @@
   function executeJiraAction(btn, def) {
     setAllButtonsDisabled(true);
 
-    var text = getMRTitleText() + "\n" + getMRDescriptionText();
-    var issueKeys = extractJiraKeys(text);
+    var issueKeys = extractJiraKeys(getMRContextText());
 
     if (issueKeys.length === 0) {
       showToast("No Jira issue keys found in MR description / title.", true);
@@ -490,16 +515,7 @@
         worklogs: worklogs
       },
       function (response) {
-        if (chrome.runtime.lastError) {
-          showToast("Extension error: " + chrome.runtime.lastError.message, true);
-          setAllButtonsDisabled(false);
-          return;
-        }
-        if (!response) {
-          showToast("No response from background.", true);
-          setAllButtonsDisabled(false);
-          return;
-        }
+        if (hasRuntimeOrEmptyResponseError(response)) return;
 
         var parts = [];
         if (response.success > 0) parts.push("\u2713 " + def.label + " \u2014 Success: " + response.success);
@@ -518,8 +534,6 @@
       }
     );
   }
-
-  // --- Toast & Dialog ---
 
   function showToast(msg, isError) {
     var toast = document.createElement("div");
@@ -557,7 +571,6 @@
       if (e.key === "Escape") { e.stopPropagation(); doCancel(); }
     };
 
-    // Prevent background scroll while dialog is open
     var prevOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     document.addEventListener("keydown", onKey);
@@ -575,27 +588,21 @@
     var container = document.getElementById(CONTAINER_ID);
     if (!container) return;
 
-    var text = getMRTitleText() + "\n" + getMRDescriptionText();
-    var issueKeys = extractJiraKeys(text);
+    var issueKeys = extractJiraKeys(getMRContextText());
 
     if (issueKeys.length === 0) return;
 
-    // Check each button that has a transition
     var btns = container.querySelectorAll("button[data-btn-label]");
     for (var i = 0; i < btns.length; i++) {
       var btn = btns[i];
-      var label = btn.dataset.btnLabel;
-      var transitionName = btn.dataset.transitionName;
-      var targetStatus = btn.dataset.targetStatus || transitionName || label;
-      var targetStatusNames = [btn.dataset.targetStatus, transitionName, label]
-        .map(function (v) { return (v || "").trim(); })
-        .filter(Boolean)
-        .filter(function (v, idx, a) { return a.indexOf(v) === idx; });
+      var def = findButtonDefByLabel(btn.dataset.btnLabel);
+      if (!def) continue;
+      var transitionName = def.transitionName;
+      var targetStatus = getTargetStatus(def);
+      var targetStatusNames = getTargetStatusNames(def);
       
-      // Skip buttons without transitions
       if (!transitionName) continue;
 
-      // Check if issues are already in this status
       safeSendMessage(
         {
           action: "checkIssueStatuses",
@@ -621,13 +628,10 @@
     }
   }
 
-  // --- Auto trigger actions ---
-
-  var AUTO_TRIGGER_COOLDOWN_MS = 1200;
-  var MERGE_PENDING_TTL_MS = 120000;
   var _pendingMergeAutoTriggerUntil = 0;
   var _lastAutoTriggerTs = { approve: 0, merge: 0, submitReview: 0 };
 
+  // Merge click may open confirmation modals; trigger only after MR status becomes merged.
   function markPendingMergeAutoTrigger() {
     _pendingMergeAutoTriggerUntil = Date.now() + MERGE_PENDING_TTL_MS;
   }
@@ -645,11 +649,12 @@
 
     var control = target.closest("button, [role='button'], input[type='submit']");
     if (!control) return null;
-    if (control.closest("#" + CONTAINER_ID)) return null;
+    if (control.closest(CONTAINER_SELECTOR)) return null;
 
-    if (control.matches("[data-testid='approve-button'], [data-qa-selector='approve_button']")) return "approve";
-    if (control.matches("[data-testid='merge-button'], [data-qa-selector='merge_button']")) return "merge";
-    if (control.matches("[data-testid='submit-review-button'], [data-qa-selector='submit_review_button']")) return "submitReview";
+    for (var i = 0; i < BUTTON_ACTION_KEYS.length; i++) {
+      var action = BUTTON_ACTION_KEYS[i];
+      if (control.matches(BUTTON_ACTION_SELECTORS[action])) return action;
+    }
 
     var text = (control.textContent || control.value || "").trim().toLowerCase();
     if (text === "approve") return "approve";
@@ -664,15 +669,14 @@
     if (now - (_lastAutoTriggerTs[action] || 0) < AUTO_TRIGGER_COOLDOWN_MS) return;
     _lastAutoTriggerTs[action] = now;
 
+    // Auto actions bypass status filters, but must respect target-branch rules.
     var targetBranch = detectTargetBranch() || _lastVisibleTargetBranch;
     if (!targetBranch) return;
 
     var matched = BUTTONS.filter(function (def) {
       return def.autoTrigger &&
         def.autoTrigger[action] &&
-        def.visibility &&
-        def.visibility.branches &&
-        def.visibility.branches.indexOf(targetBranch) !== -1;
+        matchesTargetBranch(def, targetBranch);
     });
     if (!matched.length) return;
 
@@ -680,7 +684,7 @@
       (function (def, idx) {
         setTimeout(function () {
           handleButtonClick(null, def);
-        }, idx * 250);
+        }, idx * AUTO_TRIGGER_STEP_DELAY_MS);
       })(matched[i], i);
     }
   }
@@ -697,10 +701,8 @@
         return;
       }
       triggerAutoButtons(action);
-    }, 250);
+    }, CLICK_ACTION_DELAY_MS);
   }
-
-  // --- Injection (SPA-aware) ---
 
   function isMRPage() {
     return MR_PATH_RE.test(window.location.pathname);
@@ -744,8 +746,6 @@
     if (container && container.parentNode) container.parentNode.removeChild(container);
   }
 
-  // --- MutationObserver ---
-
   var lastUrl = window.location.href;
 
   function startObserver() {
@@ -756,7 +756,7 @@
         lastUrl = window.location.href;
         removeButtons();
         resetVisibilityState();
-        setTimeout(injectButtons, 800);
+        setTimeout(injectButtons, SPA_NAVIGATION_INJECT_DELAY_MS);
       }
       if (isMRPage()) {
         if (!document.getElementById(CONTAINER_ID)) {
@@ -771,6 +771,5 @@
     injectButtons();
   }
 
-  // --- Bootstrap: load config then start ---
   loadConfig(startObserver);
 })();

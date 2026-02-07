@@ -1,5 +1,51 @@
 /* content.css — Git&Jira deroutine Dev Flow (injected into GitLab pages) */
 
+.jira-controls {
+  display: none;
+  gap: 6px;
+  margin-left: auto;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.jira-controls-label {
+  font-weight: 600;
+  font-size: 13px;
+  color: currentColor;
+}
+
+.jira-worklog-label {
+  font-size: 12px;
+  color: currentColor;
+  opacity: 0.7;
+  cursor: help;
+}
+
+.jira-worklog-input {
+  width: 48px;
+  height: 24px;
+  padding: 2px 4px;
+  font-size: 12px;
+  text-align: center;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  color: inherit;
+  background: var(--gl-background-color-subtle, var(--input-bg, transparent));
+  opacity: 0.85;
+}
+
+.jira-btn {
+  position: relative;
+  border: none;
+  color: #fff;
+  cursor: pointer;
+}
+
+.jira-btn.jira-btn--disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 /* Button hover / active */
 .jira-btn-transition {
   transition: transform .15s ease, box-shadow .15s ease, opacity .3s ease;
