@@ -142,6 +142,7 @@
     _visibilityRetries = 0;
     clearTimeout(_visibilityTimer);
 
+    var prevStatus = _lastVisibleStatus;
     var changed = force ||
       !_lastVisibleStatus ||
       !_lastVisibleTargetBranch ||
@@ -152,6 +153,12 @@
     _lastVisibleStatus = status;
     _lastVisibleTargetBranch = targetBranch;
     applyVisibility(container, status, targetBranch);
+
+    // Merge auto-trigger should run only when MR actually becomes merged.
+    if (status === "merged" && prevStatus !== "merged" && hasPendingMergeAutoTrigger()) {
+      consumePendingMergeAutoTrigger();
+      triggerAutoButtons("merge");
+    }
     
     // Update warning indicators after visibility is resolved
     setTimeout(updateWarningIndicators, 100);
@@ -188,6 +195,7 @@
     _visibilityResolved = false;
     _lastVisibleStatus = null;
     _lastVisibleTargetBranch = null;
+    _pendingMergeAutoTriggerUntil = 0;
     clearTimeout(_visibilityTimer);
     clearTimeout(_visibilityRefreshTimer);
   }
@@ -616,7 +624,21 @@
   // --- Auto trigger actions ---
 
   var AUTO_TRIGGER_COOLDOWN_MS = 1200;
+  var MERGE_PENDING_TTL_MS = 120000;
+  var _pendingMergeAutoTriggerUntil = 0;
   var _lastAutoTriggerTs = { approve: 0, merge: 0, submitReview: 0 };
+
+  function markPendingMergeAutoTrigger() {
+    _pendingMergeAutoTriggerUntil = Date.now() + MERGE_PENDING_TTL_MS;
+  }
+
+  function hasPendingMergeAutoTrigger() {
+    return Date.now() <= _pendingMergeAutoTriggerUntil;
+  }
+
+  function consumePendingMergeAutoTrigger() {
+    _pendingMergeAutoTriggerUntil = 0;
+  }
 
   function detectGitLabAction(target) {
     if (!target || !target.closest) return null;
@@ -642,8 +664,15 @@
     if (now - (_lastAutoTriggerTs[action] || 0) < AUTO_TRIGGER_COOLDOWN_MS) return;
     _lastAutoTriggerTs[action] = now;
 
+    var targetBranch = detectTargetBranch() || _lastVisibleTargetBranch;
+    if (!targetBranch) return;
+
     var matched = BUTTONS.filter(function (def) {
-      return def.autoTrigger && def.autoTrigger[action];
+      return def.autoTrigger &&
+        def.autoTrigger[action] &&
+        def.visibility &&
+        def.visibility.branches &&
+        def.visibility.branches.indexOf(targetBranch) !== -1;
     });
     if (!matched.length) return;
 
@@ -663,6 +692,10 @@
 
     setTimeout(function () {
       if (!isMRPage()) return;
+      if (action === "merge") {
+        markPendingMergeAutoTrigger();
+        return;
+      }
       triggerAutoButtons(action);
     }, 250);
   }
