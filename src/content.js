@@ -420,23 +420,61 @@
     return false;
   }
 
-  function handleButtonClick(btn, def) {
-    if (!def.transitionName) {
-      executeJiraAction(btn, def);
-      return;
-    }
+  function prepareWorklogEntries(issueKeys, def) {
+    if (!_worklogEnabled) return [];
+    var minutesInput = document.getElementById("jira-worklog-minutes");
+    var totalMinutes = parseInt(minutesInput ? minutesInput.value : "5", 10) || 0;
+    if (totalMinutes <= 0) return [];
+    var allocations = distributeMinutes(totalMinutes, issueKeys.length);
+    return issueKeys.map(function (key, idx) {
+      return { issueKey: key, minutes: allocations[idx], comment: def.worklogComment };
+    });
+  }
 
+  function handleButtonClick(btn, def) {
     setAllButtonsDisabled(true);
-    
+
     var issueKeys = extractJiraKeys(getMRContextText());
-    var targetStatusName = getTargetStatus(def);
-    var targetStatusNames = getTargetStatusNames(def);
 
     if (issueKeys.length === 0) {
       showToast("No Jira issue keys found in MR description / title.", true);
       setAllButtonsDisabled(false);
       return;
     }
+
+    var worklogs = prepareWorklogEntries(issueKeys, def);
+    var worklogAllocations = {};
+    for (var w = 0; w < worklogs.length; w++) {
+      worklogAllocations[worklogs[w].issueKey] = worklogs[w].minutes;
+    }
+
+    // Worklog-only buttons: send worklogs and show results when done
+    if (!def.transitionName) {
+      if (worklogs.length > 0) {
+        safeSendMessage({ action: "logWorklogs", worklogs: worklogs }, function (response) {
+          if (hasRuntimeOrEmptyResponseError(response)) return;
+          showDetailedToast(def, issueKeys, worklogAllocations, null, response);
+          openJiraTabsIfEnabled(issueKeys);
+          setAllButtonsDisabled(false);
+        });
+      } else {
+        showToast("Nothing to do \u2014 worklog is disabled or 0 minutes.", true);
+        setAllButtonsDisabled(false);
+      }
+      return;
+    }
+
+    // Buttons with transitions: send worklogs immediately, then proceed with transition flow
+    if (worklogs.length > 0) {
+      safeSendMessage({ action: "logWorklogs", worklogs: worklogs }, function (response) {
+        if (!chrome.runtime.lastError && response && response.failed > 0) {
+          showToast("Worklog error: " + (response.errors || []).join(", "), true);
+        }
+      });
+    }
+
+    var targetStatusName = getTargetStatus(def);
+    var targetStatusNames = getTargetStatusNames(def);
 
     safeSendMessage(
       {
@@ -452,13 +490,34 @@
           return showActionError("Status check failed: " + response.errors.join(", "));
         }
 
+        function proceed() {
+          safeSendMessage(
+            {
+              action: "processJiraAction",
+              issueKeys: issueKeys,
+              transitionName: def.transitionName,
+              worklogs: []
+            },
+            function (trResponse) {
+              if (hasRuntimeOrEmptyResponseError(trResponse)) return;
+              showDetailedToast(def, issueKeys, worklogAllocations, trResponse, null);
+              openJiraTabsIfEnabled(issueKeys);
+              setAllButtonsDisabled(false);
+            }
+          );
+        }
+
+        function cancel() {
+          setAllButtonsDisabled(false);
+        }
+
         if (response.allInTargetStatus) {
           var alreadyInStatus = response.statuses.map(function (s) { return s.issueKey; }).join(", ");
           showWarningDialog(
             "All Issues Already in Target Status",
             "All linked issues are already in '" + targetStatusName + "' status:\\n" + alreadyInStatus + "\\n\\nDo you want to proceed anyway?",
-            function () { executeJiraAction(btn, def); },
-            function () { setAllButtonsDisabled(false); }
+            proceed,
+            cancel
           );
           return;
         }
@@ -473,66 +532,94 @@
             "Some Issues Already in Target Status",
             "Some issues are already in '" + targetStatusName + "' status:\\n" + alreadyInKeys + 
             "\\n\\nIssues that will be transitioned:\\n" + notInKeys + "\\n\\nDo you want to proceed?",
-            function () { executeJiraAction(btn, def); },
-            function () { setAllButtonsDisabled(false); }
+            proceed,
+            cancel
           );
           return;
         }
 
-        executeJiraAction(btn, def);
+        proceed();
       }
     );
   }
 
-  function executeJiraAction(btn, def) {
-    setAllButtonsDisabled(true);
-
-    var issueKeys = extractJiraKeys(getMRContextText());
-
-    if (issueKeys.length === 0) {
-      showToast("No Jira issue keys found in MR description / title.", true);
-      setAllButtonsDisabled(false);
-      return;
+  function openJiraTabsIfEnabled(issueKeys) {
+    if (_autoOpenJira && _jiraBaseUrl) {
+      safeSendMessage({
+        action: "openJiraTabs",
+        urls: issueKeys.map(function (key) { return _jiraBaseUrl + "/browse/" + key; })
+      });
     }
+  }
 
-    var worklogs = [];
-    if (_worklogEnabled) {
-      var minutesInput = document.getElementById("jira-worklog-minutes");
-      var totalMinutes = parseInt(minutesInput ? minutesInput.value : "5", 10) || 0;
-      if (totalMinutes > 0) {
-        var allocations = distributeMinutes(totalMinutes, issueKeys.length);
-        worklogs = issueKeys.map(function (key, idx) {
-          return { issueKey: key, minutes: allocations[idx], comment: def.worklogComment };
-        });
+  function showDetailedToast(def, issueKeys, worklogAllocations, transitionResponse, worklogResponse) {
+    var lines = [];
+    var hasError = false;
+
+    var trMap = {};
+    if (transitionResponse && transitionResponse.details) {
+      for (var i = 0; i < transitionResponse.details.length; i++) {
+        trMap[transitionResponse.details[i].issueKey] = transitionResponse.details[i];
       }
     }
 
-    safeSendMessage(
-      {
-        action: "processJiraAction",
-        issueKeys: issueKeys,
-        transitionName: def.transitionName,
-        worklogs: worklogs
-      },
-      function (response) {
-        if (hasRuntimeOrEmptyResponseError(response)) return;
+    var wlMap = {};
+    if (worklogResponse && worklogResponse.details) {
+      for (var j = 0; j < worklogResponse.details.length; j++) {
+        wlMap[worklogResponse.details[j].issueKey] = worklogResponse.details[j];
+      }
+    }
 
-        var parts = [];
-        if (response.success > 0) parts.push("\u2713 " + def.label + " \u2014 Success: " + response.success);
-        if (response.failed > 0)  parts.push("Failed: " + response.failed);
-        if (response.errors && response.errors.length) parts.push("\n" + response.errors.join("\n"));
-        showToast(parts.join(" | "), response.failed > 0);
+    for (var k = 0; k < issueKeys.length; k++) {
+      var key = issueKeys[k];
+      var parts = [key];
 
-        if (_autoOpenJira && _jiraBaseUrl) {
-          safeSendMessage({
-            action: "openJiraTabs",
-            urls: issueKeys.map(function (key) { return _jiraBaseUrl + "/browse/" + key; })
-          });
+      if (def.transitionName && transitionResponse) {
+        var tr = trMap[key];
+        if (tr && tr.ok) {
+          parts.push(getTargetStatus(def));
+        } else if (tr) {
+          parts.push("\u2717");
+          hasError = true;
         }
-        
-        setAllButtonsDisabled(false);
       }
-    );
+
+      var minutes = worklogAllocations[key];
+      if (minutes) {
+        if (worklogResponse) {
+          var wl = wlMap[key];
+          if (wl && wl.ok) {
+            parts.push(minutes + " min");
+          } else if (wl) {
+            parts.push(minutes + " min \u2717");
+            hasError = true;
+          } else {
+            parts.push(minutes + " min");
+          }
+        } else {
+          parts.push(minutes + " min");
+        }
+      }
+
+      lines.push(parts.join(" \u2014 "));
+    }
+
+    var errors = [];
+    if (transitionResponse && transitionResponse.errors && transitionResponse.errors.length) {
+      errors = errors.concat(transitionResponse.errors);
+    }
+    if (worklogResponse && worklogResponse.errors && worklogResponse.errors.length) {
+      errors = errors.concat(worklogResponse.errors);
+    }
+    if (errors.length > 0) {
+      hasError = true;
+      for (var e = 0; e < errors.length; e++) lines.push(errors[e]);
+    }
+
+    var header = (hasError ? "" : "\u2713 ") + def.label;
+    lines.unshift(header);
+
+    showToast(lines.join("\n"), hasError);
   }
 
   function showToast(msg, isError) {

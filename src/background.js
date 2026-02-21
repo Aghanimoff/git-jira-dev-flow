@@ -37,6 +37,49 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
     return true;
   }
 
+  if (message.action === "logWorklogs") {
+    var wlEntries = (message.worklogs || []).filter(function (wl) { return wl.minutes > 0; });
+
+    if (wlEntries.length === 0) {
+      sendResponse({ success: 0, failed: 0, details: [], errors: [] });
+      return true;
+    }
+
+    chrome.storage.local.get(["jiraBaseUrl", "username", "password", "testMode"], function (cfg) {
+      var baseUrl = cfg.jiraBaseUrl ? cfg.jiraBaseUrl.replace(/\/+$/, "") : "";
+      var authHeader = "Basic " + btoa(cfg.username + ":" + cfg.password);
+      var results = { success: 0, failed: 0, details: [], errors: [] };
+
+      if (cfg.testMode) {
+        console.log("[JiraDevFlow][TEST MODE] Blocked worklog command:", wlEntries);
+        wlEntries.forEach(function (wl) {
+          results.success++;
+          results.details.push({ issueKey: wl.issueKey, minutes: wl.minutes, ok: true });
+        });
+        sendResponse(results);
+        return;
+      }
+
+      fetchUserWorklogsForToday(baseUrl, authHeader, function (err, busyIntervals) {
+        if (err) busyIntervals = [];
+        var roundedNow = roundUpTo5Minutes(new Date());
+        var idx = 0;
+
+        function nextWorklog() {
+          if (idx >= wlEntries.length) { sendResponse(results); return; }
+          var wl = wlEntries[idx++];
+          var durationMs = wl.minutes * 60 * 1000;
+          var startDate = findFreeSlot(busyIntervals, roundedNow.getTime(), durationMs);
+          busyIntervals.push({ start: startDate.getTime(), end: startDate.getTime() + durationMs });
+          logWorklog(baseUrl, authHeader, wl.issueKey, wl.minutes, wl.comment, startDate, results, nextWorklog);
+        }
+
+        nextWorklog();
+      });
+    });
+    return true;
+  }
+
   if (message.action !== "processJiraAction") return false;
 
   var issueKeys = message.issueKeys || [];
@@ -53,7 +96,7 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
     var baseUrl = cfg.jiraBaseUrl ? cfg.jiraBaseUrl.replace(/\/+$/, "") : "";
     var authHeader = "Basic " + btoa(cfg.username + ":" + cfg.password);
     console.log("[JiraDevFlow][background.js] Authorization header:", authHeader);
-    var results = { success: 0, failed: 0, errors: [] };
+    var results = { success: 0, failed: 0, errors: [], details: [] };
     var worklogEntries = worklogs.filter(function (wl) { return wl.minutes > 0; });
 
     if (!transitionName && worklogEntries.length === 0) {
@@ -62,6 +105,13 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
     }
 
     if (cfg.testMode) {
+      var testDetails = [];
+      if (transitionName) {
+        issueKeys.forEach(function (key) { testDetails.push({ issueKey: key, ok: true }); });
+      }
+      worklogEntries.forEach(function (wl) {
+        testDetails.push({ issueKey: wl.issueKey, minutes: wl.minutes, ok: true });
+      });
       var simulatedOperations = (transitionName ? issueKeys.length : 0) + worklogEntries.length;
       console.log("[JiraDevFlow][TEST MODE] Blocked Jira action command:", {
         issueKeys: issueKeys,
@@ -69,7 +119,7 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
         worklogs: worklogs,
         simulatedOperations: simulatedOperations
       });
-      sendResponse({ success: simulatedOperations, failed: 0, errors: [] });
+      sendResponse({ success: simulatedOperations, failed: 0, errors: [], details: testDetails });
       return;
     }
 
@@ -198,8 +248,17 @@ function transitionIssue(baseUrl, authHeader, issueKey, transitionName, results,
       }
       return jiraFetch(baseUrl, authHeader, path, "POST", { transition: { id: target.id } });
     })
-    .then(function () { results.success++; done(); })
-    .catch(function (err) { results.failed++; results.errors.push(err.message || String(err)); done(); });
+    .then(function () {
+      results.success++;
+      if (results.details) results.details.push({ issueKey: issueKey, ok: true });
+      done();
+    })
+    .catch(function (err) {
+      results.failed++;
+      if (results.details) results.details.push({ issueKey: issueKey, ok: false });
+      results.errors.push(err.message || String(err));
+      done();
+    });
 }
 
 // --- Helpers ---
@@ -282,6 +341,15 @@ function findFreeSlot(busyIntervals, proposedStartMs, durationMs) {
 function logWorklog(baseUrl, authHeader, issueKey, minutes, comment, startDate, results, done) {
   jiraFetch(baseUrl, authHeader, "/rest/api/2/issue/" + issueKey + "/worklog", "POST",
     { timeSpentSeconds: minutes * 60, started: formatJiraDateTime(startDate), comment: comment })
-    .then(function () { results.success++; done(); })
-    .catch(function (err) { results.failed++; results.errors.push(err.message || String(err)); done(); });
+    .then(function () {
+      results.success++;
+      if (results.details) results.details.push({ issueKey: issueKey, minutes: minutes, ok: true });
+      done();
+    })
+    .catch(function (err) {
+      results.failed++;
+      if (results.details) results.details.push({ issueKey: issueKey, minutes: minutes, ok: false });
+      results.errors.push(err.message || String(err));
+      done();
+    });
 }
