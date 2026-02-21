@@ -21,7 +21,12 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
       return true;
     }
 
-    chrome.storage.local.get(["jiraBaseUrl", "username", "password"], function (cfg) {
+    chrome.storage.local.get(["jiraBaseUrl", "username", "password", "testMode"], function (cfg) {
+      if (cfg.testMode) {
+        sendResponse(buildTestStatusResponse(issueKeys));
+        return;
+      }
+
       console.log("[JiraDevFlow][background.js] Credentials used:", cfg);
       var baseUrl = cfg.jiraBaseUrl ? cfg.jiraBaseUrl.replace(/\/+$/, "") : "";
       var authHeader = "Basic " + btoa(cfg.username + ":" + cfg.password);
@@ -43,12 +48,30 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
     return true;
   }
 
-  chrome.storage.local.get(["jiraBaseUrl", "username", "password"], function (cfg) {
+  chrome.storage.local.get(["jiraBaseUrl", "username", "password", "testMode"], function (cfg) {
     console.log("[JiraDevFlow][background.js] Credentials used:", cfg);
     var baseUrl = cfg.jiraBaseUrl ? cfg.jiraBaseUrl.replace(/\/+$/, "") : "";
     var authHeader = "Basic " + btoa(cfg.username + ":" + cfg.password);
     console.log("[JiraDevFlow][background.js] Authorization header:", authHeader);
     var results = { success: 0, failed: 0, errors: [] };
+    var worklogEntries = worklogs.filter(function (wl) { return wl.minutes > 0; });
+
+    if (!transitionName && worklogEntries.length === 0) {
+      sendResponse({ success: 0, failed: 0, errors: ["Nothing to do."] });
+      return;
+    }
+
+    if (cfg.testMode) {
+      var simulatedOperations = (transitionName ? issueKeys.length : 0) + worklogEntries.length;
+      console.log("[JiraDevFlow][TEST MODE] Blocked Jira action command:", {
+        issueKeys: issueKeys,
+        transitionName: transitionName,
+        worklogs: worklogs,
+        simulatedOperations: simulatedOperations
+      });
+      sendResponse({ success: simulatedOperations, failed: 0, errors: [] });
+      return;
+    }
 
     // --- Transition ops (parallel) ---
     var transitionOps = [];
@@ -61,12 +84,6 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
     }
 
     // --- Worklog entries (sequential, with overlap detection) ---
-    var worklogEntries = worklogs.filter(function (wl) { return wl.minutes > 0; });
-
-    if (transitionOps.length === 0 && worklogEntries.length === 0) {
-      sendResponse({ success: 0, failed: 0, errors: ["Nothing to do."] });
-      return;
-    }
 
     var transitionsDone = transitionOps.length === 0;
     var worklogsDone = worklogEntries.length === 0;
@@ -151,6 +168,20 @@ function checkIssueStatuses(baseUrl, authHeader, issueKeys, targetStatus, target
         if (--pending <= 0) sendResponse(results);
       });
   });
+}
+
+function buildTestStatusResponse(issueKeys) {
+  return {
+    allInTargetStatus: false,
+    statuses: (issueKeys || []).map(function (key) {
+      return {
+        issueKey: key,
+        currentStatus: "TEST MODE",
+        isInTargetStatus: false
+      };
+    }),
+    errors: []
+  };
 }
 
 function transitionIssue(baseUrl, authHeader, issueKey, transitionName, results, done) {

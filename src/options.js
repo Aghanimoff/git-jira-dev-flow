@@ -10,6 +10,7 @@
     "password",
     "worklogEnabled",
     "autoOpenJira",
+    "testMode",
     "buttons"
   ];
 
@@ -18,6 +19,7 @@
   const passwordInput = document.getElementById("password");
   const worklogCheckbox = document.getElementById("worklogEnabled");
   const autoOpenCheckbox = document.getElementById("autoOpenJira");
+  const testModeCheckbox = document.getElementById("testMode");
   const saveButtons = Array.from(document.querySelectorAll("[data-save-settings]"));
   const addBtn = document.getElementById("addBtn");
   const buttonsList = document.getElementById("buttons-list");
@@ -295,6 +297,7 @@
       password: passwordInput.value,
       worklogEnabled: worklogCheckbox.checked,
       autoOpenJira: autoOpenCheckbox.checked,
+      testMode: testModeCheckbox.checked,
       buttons: readButtonRows()
     };
   }
@@ -339,6 +342,7 @@
       passwordInput.value = data.password || "";
       worklogCheckbox.checked = !!data.worklogEnabled;
       autoOpenCheckbox.checked = !!data.autoOpenJira;
+      testModeCheckbox.checked = !!data.testMode;
       renderButtons(Array.isArray(data.buttons) ? data.buttons : defaults.buttons);
     });
   }
@@ -363,7 +367,7 @@
   [jiraBaseUrlInput, usernameInput, passwordInput].forEach((input) => {
     input.addEventListener("input", scheduleAutoSave);
   });
-  [worklogCheckbox, autoOpenCheckbox].forEach((checkbox) => {
+  [worklogCheckbox, autoOpenCheckbox, testModeCheckbox].forEach((checkbox) => {
     checkbox.addEventListener("change", scheduleAutoSave);
   });
   buttonsList.addEventListener("input", scheduleAutoSave);
