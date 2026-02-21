@@ -11,6 +11,7 @@
     "worklogEnabled",
     "autoOpenJira",
     "testMode",
+    "worklogOffsetMinutes",
     "buttons"
   ];
 
@@ -20,6 +21,7 @@
   const worklogCheckbox = document.getElementById("worklogEnabled");
   const autoOpenCheckbox = document.getElementById("autoOpenJira");
   const testModeCheckbox = document.getElementById("testMode");
+  const worklogOffsetInput = document.getElementById("worklogOffsetMinutes");
   const saveButtons = Array.from(document.querySelectorAll("[data-save-settings]"));
   const addBtn = document.getElementById("addBtn");
   const buttonsList = document.getElementById("buttons-list");
@@ -298,6 +300,7 @@
       worklogEnabled: worklogCheckbox.checked,
       autoOpenJira: autoOpenCheckbox.checked,
       testMode: testModeCheckbox.checked,
+      worklogOffsetMinutes: parseInt(worklogOffsetInput.value, 10) || 0,
       buttons: readButtonRows()
     };
   }
@@ -343,6 +346,7 @@
       worklogCheckbox.checked = !!data.worklogEnabled;
       autoOpenCheckbox.checked = !!data.autoOpenJira;
       testModeCheckbox.checked = !!data.testMode;
+      worklogOffsetInput.value = data.worklogOffsetMinutes || 0;
       renderButtons(Array.isArray(data.buttons) ? data.buttons : defaults.buttons);
     });
   }
@@ -364,7 +368,7 @@
     });
   });
 
-  [jiraBaseUrlInput, usernameInput, passwordInput].forEach((input) => {
+  [jiraBaseUrlInput, usernameInput, passwordInput, worklogOffsetInput].forEach((input) => {
     input.addEventListener("input", scheduleAutoSave);
   });
   [worklogCheckbox, autoOpenCheckbox, testModeCheckbox].forEach((checkbox) => {

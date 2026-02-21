@@ -52,6 +52,12 @@
           </label>
         </div>
 
+        <label class="field" for="worklogOffsetMinutes">
+          <span>Worklog Time Offset (minutes)</span>
+          <input id="worklogOffsetMinutes" type="number" step="1" value="0" />
+          <small style="color: var(--muted); font-size: 12px;">Shift worklog start time, e.g. <code>-120</code> = 2 h earlier, <code>60</code> = 1 h later</small>
+        </label>
+
         <div class="actions-row">
           <button id="save" data-save-settings type="button">Save settings</button>
           <p id="status" class="status" role="status" aria-live="polite"></p>

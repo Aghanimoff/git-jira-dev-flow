@@ -45,7 +45,7 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
       return true;
     }
 
-    chrome.storage.local.get(["jiraBaseUrl", "username", "password", "testMode"], function (cfg) {
+    chrome.storage.local.get(["jiraBaseUrl", "username", "password", "testMode", "worklogOffsetMinutes"], function (cfg) {
       var baseUrl = cfg.jiraBaseUrl ? cfg.jiraBaseUrl.replace(/\/+$/, "") : "";
       var authHeader = "Basic " + btoa(cfg.username + ":" + cfg.password);
       var results = { success: 0, failed: 0, details: [], errors: [] };
@@ -60,9 +60,11 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
         return;
       }
 
+      var offsetMs = (cfg.worklogOffsetMinutes || 0) * 60 * 1000;
+
       fetchUserWorklogsForToday(baseUrl, authHeader, function (err, busyIntervals) {
         if (err) busyIntervals = [];
-        var roundedNow = roundUpTo5Minutes(new Date());
+        var roundedNow = roundUpTo5Minutes(new Date(Date.now() + offsetMs));
         var idx = 0;
 
         function nextWorklog() {
@@ -91,7 +93,7 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
     return true;
   }
 
-  chrome.storage.local.get(["jiraBaseUrl", "username", "password", "testMode"], function (cfg) {
+  chrome.storage.local.get(["jiraBaseUrl", "username", "password", "testMode", "worklogOffsetMinutes"], function (cfg) {
     console.log("[JiraDevFlow][background.js] Credentials used:", cfg);
     var baseUrl = cfg.jiraBaseUrl ? cfg.jiraBaseUrl.replace(/\/+$/, "") : "";
     var authHeader = "Basic " + btoa(cfg.username + ":" + cfg.password);
@@ -156,11 +158,12 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
     }
 
     // Process worklogs: fetch existing, then create sequentially in free slots
+    var processOffsetMs = (cfg.worklogOffsetMinutes || 0) * 60 * 1000;
     if (worklogEntries.length > 0) {
       fetchUserWorklogsForToday(baseUrl, authHeader, function (err, busyIntervals) {
         if (err) busyIntervals = []; // proceed without overlap check on error
 
-        var roundedNow = roundUpTo5Minutes(new Date());
+        var roundedNow = roundUpTo5Minutes(new Date(Date.now() + processOffsetMs));
         var idx = 0;
 
         function nextWorklog() {

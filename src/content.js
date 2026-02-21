@@ -212,7 +212,7 @@
       if (show) anyVisible = true;
     }
 
-    container.style.display = anyVisible ? "inline-flex" : "none";
+    container.style.display = (anyVisible || _worklogEnabled) ? "inline-flex" : "none";
   }
 
   function resetVisibilityState() {
@@ -420,6 +420,11 @@
     return false;
   }
 
+  function resetWorklogInput() {
+    var input = document.getElementById("jira-worklog-minutes");
+    if (input) input.value = "5";
+  }
+
   function prepareWorklogEntries(issueKeys, def) {
     if (!_worklogEnabled) return [];
     var minutesInput = document.getElementById("jira-worklog-minutes");
@@ -455,6 +460,7 @@
           if (hasRuntimeOrEmptyResponseError(response)) return;
           showDetailedToast(def, issueKeys, worklogAllocations, null, response);
           openJiraTabsIfEnabled(issueKeys);
+          resetWorklogInput();
           setAllButtonsDisabled(false);
         });
       } else {
@@ -502,6 +508,7 @@
               if (hasRuntimeOrEmptyResponseError(trResponse)) return;
               showDetailedToast(def, issueKeys, worklogAllocations, trResponse, null);
               openJiraTabsIfEnabled(issueKeys);
+              resetWorklogInput();
               setAllButtonsDisabled(false);
             }
           );
