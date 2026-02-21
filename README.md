@@ -17,18 +17,8 @@ Chrome extension that streamlines developer workflow between GitLab and Jira.
 2. Open extension settings and configure your Jira instance URL, username, or API token  
 ![Settings page](docs/screenshot-settings.png)
 
-
-## Button Visibility Rules
-
-| Button | MR Status | Target Branch |
-|---|---|---|
-| CodeReview | Open | develop |
-| Bugfix | Open | develop |
-| Internal Test | Merged | develop |
-| Test Control | Merged | stage |
-| Done | Merged | master |
-
-> TODO: add configurable rules in settings
+3. Configure buttons on the **Buttons** tab — transitions, visibility filters, and auto-triggers
+![Button settings](docs/screenshot-settings-buttons.png)
 
 ## More information in tooltips
 ![Tooltip with issue details](docs/screenshot-tooltip.png)
