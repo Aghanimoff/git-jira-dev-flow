@@ -145,8 +145,8 @@
 
     appendCells(tr, [
       labelInput,
-      transitionInput,
       colorInput,
+      transitionInput,
       worklogInput,
       statusSelect,
       branchesInput,

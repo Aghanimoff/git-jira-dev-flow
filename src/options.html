@@ -20,20 +20,28 @@
 
     <section class="tab-content" id="tab-general">
       <div class="panel">
+        <h3 class="section-title">Jira Connection</h3>
+
         <label class="field" for="jiraBaseUrl">
           <span>Jira Base URL</span>
           <input id="jiraBaseUrl" type="url" placeholder="https://company.atlassian.net" />
         </label>
 
-        <label class="field" for="username">
-          <span>Username</span>
-          <input id="username" type="text" placeholder="name@company.com" />
-        </label>
+        <div class="field-row">
+          <label class="field" for="username">
+            <span>Username</span>
+            <input id="username" type="text" placeholder="name@company.com" />
+          </label>
 
-        <label class="field" for="password">
-          <span>Password / API Token</span>
-          <input id="password" type="password" />
-        </label>
+          <label class="field" for="password">
+            <span>Password / API Token</span>
+            <input id="password" type="password" />
+          </label>
+        </div>
+
+        <div class="conn-status" id="connStatus" role="status" aria-live="polite"></div>
+
+        <h3 class="section-title">Options</h3>
 
         <div class="checkbox-group">
           <label class="checkbox-row" for="worklogEnabled">
@@ -55,15 +63,13 @@
         <label class="field" for="worklogOffsetMinutes">
           <span>Worklog Time Offset (minutes)</span>
           <input id="worklogOffsetMinutes" type="number" step="1" value="0" />
-          <small style="color: var(--muted); font-size: 12px;">Shift worklog start time, e.g. <code>-120</code> = 2 h earlier, <code>60</code> = 1 h later</small>
+          <small class="field-hint">Shift worklog start time, e.g. <code>-120</code> = 2 h earlier, <code>60</code> = 1 h later</small>
         </label>
 
         <div class="actions-row">
           <button id="save" data-save-settings type="button">Save settings</button>
           <p id="status" class="status" role="status" aria-live="polite"></p>
         </div>
-
-        <div class="conn-status" id="connStatus" role="status" aria-live="polite"></div>
       </div>
     </section>
 
@@ -77,16 +83,23 @@
         <div class="buttons-table-wrap">
           <table class="buttons-table">
             <thead>
+              <tr class="group-header">
+                <th colspan="2">Button</th>
+                <th colspan="2">Jira Action</th>
+                <th colspan="2">Visibility Filter</th>
+                <th colspan="3">Auto-trigger</th>
+                <th></th>
+              </tr>
               <tr>
                 <th>Label</th>
-                <th>Transition</th>
                 <th>Color</th>
-                <th>Worklog</th>
-                <th>Status</th>
-                <th>Branches</th>
-                <th>Auto Approve</th>
-                <th>Auto Merge</th>
-                <th>Auto Review</th>
+                <th>Transition</th>
+                <th>Worklog Comment</th>
+                <th>MR Status</th>
+                <th>Target Branches</th>
+                <th>Approve</th>
+                <th>Merge</th>
+                <th>Review</th>
                 <th></th>
               </tr>
             </thead>
