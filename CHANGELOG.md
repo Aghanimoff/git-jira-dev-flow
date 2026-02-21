@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.1
+
+- Fixed: extension CSS no longer injected into non-GitLab pages (was breaking Jira UI due to class name collisions)
+
 ## 1.2.0
 
 ### Worklog improvements

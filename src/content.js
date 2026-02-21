@@ -41,6 +41,16 @@
   };
   var BUTTON_ACTION_KEYS = ["approve", "merge", "submitReview"];
 
+  var _cssInjected = false;
+  function injectStylesheet() {
+    if (_cssInjected) return;
+    _cssInjected = true;
+    var link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = chrome.runtime.getURL("src/content.css");
+    (document.head || document.documentElement).appendChild(link);
+  }
+
   // Keep UI resilient when extension reload invalidates the runtime port.
   function safeSendMessage(msg, callback) {
     try {
@@ -804,6 +814,7 @@
 
   function injectButtons() {
     if (!isMRPage()) { removeButtons(); return; }
+    injectStylesheet();
     if (document.getElementById(CONTAINER_ID)) return;
 
     var target = findInjectionTarget();
