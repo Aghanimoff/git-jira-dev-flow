@@ -383,6 +383,7 @@
     btn.type = "button";
     btn.className = "btn gl-button btn-sm jira-btn jira-btn-transition";
     btn.style.backgroundColor = def.color;
+    btn.style.color = "#fff";
     btn.dataset.btnLabel = def.label;
     btn.style.display = "none";
 
